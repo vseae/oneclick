@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="OneClick">
+  <circle cx="256" cy="256" r="256" fill="#627fdb"/>
+  <path d="M256 116 170 258l86-39 86 39-86-142Z" fill="#ffffff"/>
+  <path d="M256 116v103l86 39-86-142Z" fill="#c7d1f4"/>
+  <path d="m170 274 86 50 86-50-86 120-86-120Z" fill="#ffffff"/>
+  <path d="m256 324 86-50-86 120V324Z" fill="#c7d1f4"/>
+  <path d="m170 258 86-39 86 39-86 52-86-52Z" fill="#b8c5f0"/>
+  <path d="m256 219 86 39-86 52v-91Z" fill="#8499ea"/>
+  <path d="m170 274 86 50 86-50-86 36-86-36Z" fill="#4f70d3"/>
+</svg>
