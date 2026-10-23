@@ -315,7 +315,8 @@ body {
   width: 256px;
   border-right: 1px solid var(--terminal-separator);
   background: rgba(255, 255, 255, 0.68);
-  display: none;
+  display: flex;
+  flex-direction: column;
   z-index: 45;
 }
 
@@ -324,6 +325,65 @@ body {
     display: flex;
     flex-direction: column;
   }
+}
+
+@media (max-width: 767px) {
+  .terminal-sidebar {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    max-height: 42vh;
+    margin-top: 56px;
+    border-right: 0;
+    border-bottom: 1px solid var(--terminal-separator);
+  }
+
+  .terminal-sidebar + main {
+    padding-top: 8px;
+  }
+}
+
+.side-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  color: var(--terminal-text-secondary);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.side-icon:hover {
+  border-color: var(--terminal-separator);
+  background: var(--terminal-hover);
+  color: var(--terminal-blue);
+}
+
+.side-contract-form .terminal-btn {
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+}
+
+.side-contract-form .terminal-btn span {
+  display: none !important;
+}
+
+.menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--terminal-text);
+}
+
+.menu-item:hover {
+  background: var(--terminal-hover);
 }
 
 .terminal-nav-item {

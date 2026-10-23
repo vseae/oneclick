@@ -1,20 +1,12 @@
 "use client";
 
-import { useState, useCallback, memo, useMemo } from "react";
+import { useState, useCallback, memo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useAccount } from "wagmi";
 import { Dot, Plug, Radio } from "lucide-react";
 import Header from "@/components/layout/Header";
 import SideNav from "@/components/layout/SideNav";
-import ContractTable from "@/components/contracts/ContractTable";
-
-interface ContractRecord {
-  id: number;
-  name: string;
-  address: string;
-  chainId: number;
-  abi: import("ethers").InterfaceAbi;
-}
+import type { ContractRecord } from "@/components/layout/SideNav";
 
 const ContractInteractView = dynamic(() => import("@/components/interact/ContractInteractView"), { ssr: false });
 const HistoryView = dynamic(() => import("@/components/history/HistoryView"), { ssr: false });
@@ -35,48 +27,46 @@ const EmptyState = memo(function EmptyState({ icon, title, subtitle }: { icon: R
 
 export default function Home() {
   const { isConnected, chainId } = useAccount();
-  const [openContracts, setOpenContracts] = useState<ContractRecord[]>([]);
-  const [currentContracts, setCurrentContracts] = useState<ContractRecord[]>([]);
+  const [currentContract, setCurrentContract] = useState<ContractRecord | null>(null);
+  const [panelContracts, setPanelContracts] = useState<Record<number, ContractRecord>>({});
   const [historyVersion, setHistoryVersion] = useState(0);
 
   const handleHistoryUpdate = useCallback(() => {
     setHistoryVersion(v => v + 1);
   }, []);
 
-  const handleSelectContract = useCallback((c: ContractRecord) => {
-    setOpenContracts(prev => {
-      const exists = prev.some(item => item.id === c.id);
-      if (exists) return prev;
-      return [...prev, c];
+  const handleSelectContract = useCallback((contract: ContractRecord) => {
+    setPanelContracts((current) => ({ ...current, [contract.id]: contract }));
+    setCurrentContract(contract);
+  }, []);
+
+  const handleDeleteContract = useCallback((id: number) => {
+    setPanelContracts((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
     });
+    setCurrentContract((current) => current?.id === id ? null : current);
   }, []);
 
-  const handleCloseContract = useCallback((id: number) => {
-    setOpenContracts(prev => prev.filter(item => item.id !== id));
-  }, []);
+  useEffect(() => {
+    const reset = window.setTimeout(() => {
+      setCurrentContract(null);
+      setPanelContracts({});
+    }, 0);
+    return () => window.clearTimeout(reset);
+  }, [chainId]);
 
-  const handleToggleContract = useCallback((c: ContractRecord) => {
-    setOpenContracts(prev => {
-      const exists = prev.some(item => item.id === c.id);
-      if (exists) return prev.filter(item => item.id !== c.id);
-      return [...prev, c];
-    });
-  }, []);
-
-  const visibleOpenContracts = useMemo(
-    () => openContracts.filter(contract => chainId && contract.chainId === chainId),
-    [openContracts, chainId]
-  );
-  const openContractIds = useMemo(() => new Set(visibleOpenContracts.map(c => c.id)), [visibleOpenContracts]);
+  const visibleCurrentContract = currentContract && currentContract.chainId === chainId ? currentContract : null;
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[var(--terminal-bg)] text-[var(--terminal-text)]">
       <Header />
       <SideNav
-        contracts={currentContracts}
         currentChainId={chainId}
-        openContractIds={openContractIds}
-        onToggleContract={handleToggleContract}
+        currentContractId={visibleCurrentContract?.id ?? null}
+        onSelectContract={handleSelectContract}
+        onDeleteContract={handleDeleteContract}
       />
 
       <main className="min-w-0 pt-14 md:pl-64">
@@ -104,44 +94,29 @@ export default function Home() {
               subtitle="请连接钱包后加载合约面板与历史记录"
             />
           ) : (
-            <>
-              <ContractTable
-                onSelectContract={handleSelectContract}
-                openContractIds={openContractIds}
-                onToggleContract={handleToggleContract}
-                onContractsChange={setCurrentContracts}
-              />
-
-              <div className="terminal-main-grid">
-                <div className="min-w-0 space-y-2">
-                  {visibleOpenContracts.length === 0 ? (
-                    <EmptyState
-                      icon={<Plug size={24} className="text-[var(--terminal-text-secondary)]" />}
-                      title="Select Contract"
-                      subtitle="请在上方列表中点击合约以打开执行面板"
+            <div className="terminal-main-grid">
+              <div className="min-w-0">
+                {visibleCurrentContract ? Object.values(panelContracts).map((contract) => (
+                  <div key={contract.id} className={contract.id === visibleCurrentContract.id ? "" : "hidden"} aria-hidden={contract.id !== visibleCurrentContract.id}>
+                    <ContractInteractView
+                      contract={contract}
+                      onClose={() => setCurrentContract(null)}
+                      onHistoryUpdate={handleHistoryUpdate}
                     />
-                  ) : (
-                    visibleOpenContracts.map(c => (
-                      <ContractInteractView
-                        key={c.id}
-                        contract={c}
-                        onClose={() => handleCloseContract(c.id)}
-                        onHistoryUpdate={handleHistoryUpdate}
-                      />
-                    ))
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <HistoryView refreshKey={historyVersion} />
-                </div>
+                  </div>
+                )) : (
+                  <EmptyState
+                    icon={<Plug size={24} className="text-[var(--terminal-text-secondary)]" />}
+                    title="Select Contract"
+                    subtitle="请从左侧合约列表选择一个合约以打开交互面板"
+                  />
+                )}
               </div>
-            </>
+              <div className="min-w-0"><HistoryView refreshKey={historyVersion} /></div>
+            </div>
           )}
         </div>
 
-        <footer className="border-t border-[var(--terminal-separator)] bg-[var(--terminal-card)] px-4 py-2 text-[11px] tracking-[0.01em] text-[var(--terminal-text-secondary)]">
-          SYSTEM_HEALTH: <span className="text-[var(--terminal-green)]">100% // NO_ERRORS_DETECTED</span>
-        </footer>
       </main>
     </div>
   );
