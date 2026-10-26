@@ -320,13 +320,6 @@ body {
   z-index: 45;
 }
 
-@media (min-width: 768px) {
-  .terminal-sidebar {
-    display: flex;
-    flex-direction: column;
-  }
-}
-
 @media (max-width: 767px) {
   .terminal-sidebar {
     position: relative;
@@ -361,14 +354,18 @@ body {
   color: var(--terminal-blue);
 }
 
-.side-contract-form .terminal-btn {
-  width: 28px !important;
-  height: 28px !important;
-  padding: 0 !important;
+.side-icon:focus-visible {
+  outline: 2px solid var(--terminal-blue);
+  outline-offset: -2px;
+  color: var(--terminal-blue);
 }
 
-.side-contract-form .terminal-btn span {
-  display: none !important;
+.terminal-btn-compact {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  gap: 0;
+  flex: 0 0 auto;
 }
 
 .menu-item {
@@ -384,6 +381,11 @@ body {
 
 .menu-item:hover {
   background: var(--terminal-hover);
+}
+
+.menu-item:focus-visible {
+  outline: 2px solid var(--terminal-blue);
+  outline-offset: -2px;
 }
 
 .terminal-nav-item {

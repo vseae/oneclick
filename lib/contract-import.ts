@@ -1,7 +1,6 @@
 import type { InterfaceAbi } from "ethers";
 import type { UpsertContractInput } from "@/lib/local-store";
-
-const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
+import { contractAbiSchema, contractAddressSchema } from "@/lib/contract-validation";
 
 interface ParseContractImportOptions {
   defaultChainId: number;
@@ -36,11 +35,19 @@ function parseChainId(value: unknown, defaultChainId: number): number {
 }
 
 function parseAbi(value: unknown): InterfaceAbi {
-  const abi = typeof value === "string" ? JSON.parse(value) : value;
-  if (!Array.isArray(abi)) {
-    throw new Error("ABI 必须是 JSON 数组");
+  let abi = value;
+  if (typeof value === "string") {
+    try {
+      abi = JSON.parse(value);
+    } catch {
+      throw new Error("ABI 必须是合法的 JSON");
+    }
   }
-  return abi as InterfaceAbi;
+  const result = contractAbiSchema.safeParse(abi);
+  if (!result.success) {
+    throw new Error(result.error.issues[0]?.message ?? "ABI 无效");
+  }
+  return result.data;
 }
 
 function getName(item: ContractImportLike, sourceName?: string): string {
@@ -65,13 +72,17 @@ function normalizeItem(
     throw new Error("合约条目必须是对象");
   }
 
-  if (typeof item.address !== "string" || !ADDRESS_PATTERN.test(item.address.trim())) {
+  if (typeof item.address !== "string") {
     throw new Error("无效的合约地址");
+  }
+  const address = contractAddressSchema.safeParse(item.address);
+  if (!address.success) {
+    throw new Error(address.error.issues[0]?.message ?? "无效的合约地址");
   }
 
   return {
     name: getName(item, options.sourceName),
-    address: item.address.trim(),
+    address: address.data,
     chainId: parseChainId(item.chainId, options.defaultChainId),
     abi: parseAbi(item.abi),
   };
@@ -98,7 +109,12 @@ export async function parseContractImportSources(
 
   for (const source of sources) {
     try {
-      const payload = JSON.parse(await source.text());
+      let payload: unknown;
+      try {
+        payload = JSON.parse(await source.text());
+      } catch {
+        throw new Error("JSON 格式错误");
+      }
       contracts.push(...parseContractImportPayload(payload, {
         ...options,
         sourceName: source.name,

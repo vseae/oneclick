@@ -1,15 +1,21 @@
 "use client";
 
-import { useState, useCallback, memo, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo, memo } from "react";
 import dynamic from "next/dynamic";
 import { useAccount } from "wagmi";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Dot, Plug, Radio } from "lucide-react";
 import Header from "@/components/layout/Header";
 import SideNav from "@/components/layout/SideNav";
-import type { ContractRecord } from "@/components/layout/SideNav";
+import { contractKeys, historyKeys, useContracts } from "@/lib/queries";
+import type { ContractRecord } from "@/lib/types";
 
 const ContractInteractView = dynamic(() => import("@/components/interact/ContractInteractView"), { ssr: false });
 const HistoryView = dynamic(() => import("@/components/history/HistoryView"), { ssr: false });
+
+/** Keep a bounded number of panels mounted so switching contracts preserves in-session state. */
+const MAX_OPEN_PANELS = 8;
 
 const EmptyState = memo(function EmptyState({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {
   return (
@@ -27,46 +33,82 @@ const EmptyState = memo(function EmptyState({ icon, title, subtitle }: { icon: R
 
 export default function Home() {
   const { isConnected, chainId } = useAccount();
-  const [currentContract, setCurrentContract] = useState<ContractRecord | null>(null);
-  const [panelContracts, setPanelContracts] = useState<Record<number, ContractRecord>>({});
-  const [historyVersion, setHistoryVersion] = useState(0);
+  const queryClient = useQueryClient();
+  const { data: contracts = [], error: contractsError, isPending: contractsPending } = useContracts(chainId);
 
-  const handleHistoryUpdate = useCallback(() => {
-    setHistoryVersion(v => v + 1);
-  }, []);
+  const [currentContractId, setCurrentContractId] = useState<number | null>(null);
+  const [openPanelIds, setOpenPanelIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (contractsError) {
+      toast.error("获取合约失败");
+    }
+  }, [contractsError]);
+
+  const contractById = useMemo(
+    () => new Map(contracts.map((contract) => [contract.id, contract])),
+    [contracts]
+  );
+
+  // The panel always reads the latest catalog entry, so edits/imports are reflected
+  // without duplicating contract snapshots in page state.
+  const visibleCurrentContract = currentContractId === null
+    ? null
+    : contractById.get(currentContractId) ?? null;
+
+  const visiblePanelIds = useMemo(
+    () => openPanelIds.filter((id) => contractById.has(id)),
+    [openPanelIds, contractById]
+  );
 
   const handleSelectContract = useCallback((contract: ContractRecord) => {
-    setPanelContracts((current) => ({ ...current, [contract.id]: contract }));
-    setCurrentContract(contract);
+    setOpenPanelIds((current) => {
+      const next = current.filter((id) => id !== contract.id);
+      next.push(contract.id);
+      return next.slice(-MAX_OPEN_PANELS);
+    });
+    setCurrentContractId(contract.id);
+  }, []);
+
+  const handleClosePanel = useCallback(() => {
+    setCurrentContractId(null);
   }, []);
 
   const handleDeleteContract = useCallback((id: number) => {
-    setPanelContracts((current) => {
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-    setCurrentContract((current) => current?.id === id ? null : current);
-  }, []);
+    queryClient.setQueryData<ContractRecord[]>(
+      contractKeys.byChain(chainId),
+      (current) => current?.filter((contract) => contract.id !== id)
+    );
+    setOpenPanelIds((current) => current.filter((panelId) => panelId !== id));
+    setCurrentContractId((current) => (current === id ? null : current));
+    void queryClient.invalidateQueries({ queryKey: historyKeys.byChain(chainId) });
+  }, [queryClient, chainId]);
 
-  useEffect(() => {
-    const reset = window.setTimeout(() => {
-      setCurrentContract(null);
-      setPanelContracts({});
-    }, 0);
-    return () => window.clearTimeout(reset);
-  }, [chainId]);
+  const handleCatalogChanged = useCallback(async () => {
+    // Editing/upserting a contract also syncs the denormalized name/address on
+    // its System Log rows, so refresh both queries together.
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: contractKeys.byChain(chainId) }),
+      queryClient.invalidateQueries({ queryKey: historyKeys.byChain(chainId) }),
+    ]);
+  }, [queryClient, chainId]);
 
-  const visibleCurrentContract = currentContract && currentContract.chainId === chainId ? currentContract : null;
+  const handleHistoryUpdate = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: historyKeys.byChain(chainId) });
+  }, [queryClient, chainId]);
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[var(--terminal-bg)] text-[var(--terminal-text)]">
       <Header />
       <SideNav
+        contracts={contracts}
         currentChainId={chainId}
         currentContractId={visibleCurrentContract?.id ?? null}
+        isLoading={contractsPending && typeof chainId === "number"}
+        hasError={Boolean(contractsError)}
         onSelectContract={handleSelectContract}
         onDeleteContract={handleDeleteContract}
+        onCatalogChanged={handleCatalogChanged}
       />
 
       <main className="min-w-0 pt-14 md:pl-64">
@@ -96,15 +138,21 @@ export default function Home() {
           ) : (
             <div className="terminal-main-grid">
               <div className="min-w-0">
-                {visibleCurrentContract ? Object.values(panelContracts).map((contract) => (
-                  <div key={contract.id} className={contract.id === visibleCurrentContract.id ? "" : "hidden"} aria-hidden={contract.id !== visibleCurrentContract.id}>
-                    <ContractInteractView
-                      contract={contract}
-                      onClose={() => setCurrentContract(null)}
-                      onHistoryUpdate={handleHistoryUpdate}
-                    />
-                  </div>
-                )) : (
+                {visiblePanelIds.map((id) => {
+                  const contract = contractById.get(id);
+                  if (!contract) return null;
+                  const isCurrent = visibleCurrentContract?.id === id;
+                  return (
+                    <div key={id} className={isCurrent ? "" : "hidden"} aria-hidden={!isCurrent}>
+                      <ContractInteractView
+                        contract={contract}
+                        onClose={handleClosePanel}
+                        onHistoryUpdate={handleHistoryUpdate}
+                      />
+                    </div>
+                  );
+                })}
+                {!visibleCurrentContract && (
                   <EmptyState
                     icon={<Plug size={24} className="text-[var(--terminal-text-secondary)]" />}
                     title="Select Contract"
@@ -112,11 +160,10 @@ export default function Home() {
                   />
                 )}
               </div>
-              <div className="min-w-0"><HistoryView refreshKey={historyVersion} /></div>
+              <div className="min-w-0"><HistoryView /></div>
             </div>
           )}
         </div>
-
       </main>
     </div>
   );

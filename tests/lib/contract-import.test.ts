@@ -86,4 +86,22 @@ describe("contract import parser", () => {
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toMatch(/^Broken\.json:/);
   });
+
+  it("rejects malformed addresses and ABIs", async () => {
+    const mod = await import("../../lib/contract-import");
+
+    expect(() =>
+      mod.parseContractImportPayload(
+        { name: "BadAddress", address: "0x123", abi: [] },
+        { defaultChainId: 1 }
+      )
+    ).toThrow("无效的合约地址");
+
+    expect(() =>
+      mod.parseContractImportPayload(
+        { name: "BadAbi", address: "0x5555555555555555555555555555555555555555", abi: {} },
+        { defaultChainId: 1 }
+      )
+    ).toThrow("ABI 必须是合法的 JSON ABI 数组");
+  });
 });

@@ -10,6 +10,7 @@ import type {
   UpdateContractInput,
   UpsertContractInput,
 } from "@/lib/local-store";
+import { assertContractInput, assertContractUpdate, contractInputSchema } from "@/lib/contract-validation";
 
 type SqliteDatabase = Database.Database;
 
@@ -39,7 +40,6 @@ interface HistoryRow {
 }
 
 const DEFAULT_DB_PATH = path.join(process.cwd(), "data", "app.sqlite");
-const ADDRESS_PATTERN = /^0x[a-f0-9]{40}$/i;
 
 function normalizeAddress(address: string): string {
   return address.trim().toLowerCase();
@@ -73,6 +73,22 @@ function serializeJson(value: unknown): string {
 
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
+}
+
+/**
+ * History rows keep a denormalized snapshot of the contract name/address for
+ * display. Keep those fields in sync when a contract is renamed or moved so the
+ * System Log never shows a stale identity.
+ */
+function syncHistoryContractFields(
+  db: SqliteDatabase,
+  contractId: number,
+  name: string,
+  address: string
+): void {
+  db.prepare(
+    "UPDATE history SET contractName = ?, contractAddress = ? WHERE contractId = ?"
+  ).run(name, address, contractId);
 }
 
 function rowToContract(row: ContractRow): LocalContractRecord {
@@ -177,21 +193,27 @@ function prepareSnapshot(snapshot: LocalDataSnapshot) {
       continue;
     }
 
-    const normalizedAddress = normalizeAddress(item.address);
-    if (!ADDRESS_PATTERN.test(normalizedAddress)) {
+    const parsed = contractInputSchema.safeParse({
+      name: item.name,
+      address: item.address,
+      chainId,
+      abi: item.abi,
+    });
+    if (!parsed.success) {
       invalidContractCount += 1;
       continue;
     }
 
+    const normalizedAddress = normalizeAddress(parsed.data.address);
     const sourceId = typeof item.id === "number" && Number.isInteger(item.id) && item.id > 0 ? item.id : undefined;
     preparedContracts.push({
       sourceId,
       record: {
         id: sourceId,
-        name: String(item.name),
+        name: parsed.data.name,
         address: normalizedAddress,
         chainId,
-        abi: item.abi,
+        abi: parsed.data.abi,
         createdAt: item.createdAt ?? new Date().toISOString(),
         addressChainKey: buildAddressChainKey(chainId, normalizedAddress),
       },
@@ -273,8 +295,8 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     return row ? rowToContract(row) : null;
   };
 
-  const upsertContract = (input: UpsertContractInput): { id: number; updated: boolean } => {
-    assertValidChainId(input.chainId, "chainId");
+  const upsertContract = (rawInput: UpsertContractInput): { id: number; updated: boolean } => {
+    const input = assertContractInput(rawInput);
     const normalizedAddress = normalizeAddress(input.address);
     const addressChainKey = buildAddressChainKey(input.chainId, normalizedAddress);
     const existing = db
@@ -282,11 +304,15 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
       .get(addressChainKey) as ContractRow | undefined;
 
     if (existing) {
-      db.prepare(
-        `UPDATE contracts
-         SET name = ?, address = ?, chainId = ?, abi = ?, addressChainKey = ?
-         WHERE id = ?`
-      ).run(input.name, normalizedAddress, input.chainId, serializeJson(input.abi), addressChainKey, existing.id);
+      const updateExisting = db.transaction(() => {
+        db.prepare(
+          `UPDATE contracts
+           SET name = ?, address = ?, chainId = ?, abi = ?, addressChainKey = ?
+           WHERE id = ?`
+        ).run(input.name, normalizedAddress, input.chainId, serializeJson(input.abi), addressChainKey, existing.id);
+        syncHistoryContractFields(db, existing.id, input.name, normalizedAddress);
+      });
+      updateExisting();
       return { id: existing.id, updated: true };
     }
 
@@ -335,14 +361,12 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     remove(ids);
   };
 
-  const updateContractById = (id: number, updates: UpdateContractInput): void => {
-    if (typeof updates.chainId !== "undefined") {
-      assertValidChainId(updates.chainId, "chainId");
-    }
+  const updateContractById = (id: number, rawUpdates: UpdateContractInput): void => {
+    const updates = assertContractUpdate(rawUpdates);
 
     const existing = getContractById(id);
     if (!existing) {
-      throw new Error("Contract not found");
+      throw new Error("合约不存在，可能已被删除");
     }
 
     const nextName = updates.name ?? existing.name;
@@ -355,14 +379,18 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
       .get(nextAddressChainKey) as { id: number } | undefined;
 
     if (conflict && conflict.id !== id) {
-      throw new Error("Contract with same address and chain already exists");
+      throw new Error("当前网络已存在相同地址的合约");
     }
 
-    db.prepare(
-      `UPDATE contracts
-       SET name = ?, address = ?, chainId = ?, abi = ?, addressChainKey = ?
-       WHERE id = ?`
-    ).run(nextName, nextAddress, nextChainId, serializeJson(nextAbi), nextAddressChainKey, id);
+    const update = db.transaction(() => {
+      db.prepare(
+        `UPDATE contracts
+         SET name = ?, address = ?, chainId = ?, abi = ?, addressChainKey = ?
+         WHERE id = ?`
+      ).run(nextName, nextAddress, nextChainId, serializeJson(nextAbi), nextAddressChainKey, id);
+      syncHistoryContractFields(db, id, nextName, nextAddress);
+    });
+    update();
   };
 
   const addHistory = (input: AddHistoryInput): number => {

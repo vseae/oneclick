@@ -63,7 +63,85 @@ describe("sqlite-store contracts", () => {
         chainId: 0,
         abi: [],
       })
-    ).toThrow("chainId must be a positive integer");
+    ).toThrow("链 ID 必须是正整数");
+  });
+
+  it("validates contract fields before writing", () => {
+    const store = createTempStore();
+
+    expect(() =>
+      store.upsertContract({
+        name: "BadAddress",
+        address: "0x123",
+        chainId: 1,
+        abi: [],
+      })
+    ).toThrow("无效的合约地址");
+
+    expect(() =>
+      store.upsertContract({
+        name: "   ",
+        address: TOKEN_A,
+        chainId: 1,
+        abi: [],
+      })
+    ).toThrow("请输入合约名称");
+
+    expect(() =>
+      store.upsertContract({
+        name: "BadAbi",
+        address: TOKEN_A,
+        chainId: 1,
+        abi: {} as never,
+      })
+    ).toThrow("ABI 必须是合法的 JSON ABI 数组");
+
+    const { id } = store.upsertContract({
+      name: "Valid",
+      address: TOKEN_A,
+      chainId: 1,
+      abi: [],
+    });
+
+    expect(() => store.updateContractById(id, { address: "0x123" })).toThrow("无效的合约地址");
+    expect(() => store.updateContractById(id, { name: "  " })).toThrow("请输入合约名称");
+    expect(() => store.updateContractById(id, { abi: {} as never })).toThrow("ABI 必须是合法的 JSON ABI 数组");
+    expect(store.getContractById(id)).toEqual(
+      expect.objectContaining({ name: "Valid", address: TOKEN_A })
+    );
+
+    expect(() => store.updateContractById(999, { name: "Missing" })).toThrow("合约不存在");
+  });
+
+  it("keeps history contract identity in sync when a contract is edited", () => {
+    const store = createTempStore();
+    const { id } = store.upsertContract({
+      name: "OldName",
+      address: TOKEN_A,
+      chainId: 1,
+      abi: [],
+    });
+
+    store.addHistory({
+      contractId: id,
+      contractName: "OldName",
+      contractAddress: TOKEN_A,
+      methodName: "symbol",
+      methodType: "read",
+      params: [],
+      result: "TKA",
+      chainId: 1,
+    });
+
+    store.updateContractById(id, { name: "NewName", address: TOKEN_B });
+
+    expect(store.listHistory()).toEqual([
+      expect.objectContaining({
+        contractId: id,
+        contractName: "NewName",
+        contractAddress: TOKEN_B,
+      }),
+    ]);
   });
 
   it("deletes contract history through foreign key cascade", () => {

@@ -5,17 +5,10 @@ import { ethers } from "ethers";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
-import { BookOpen, Send, ChevronDown, ChevronUp, Copy, X, Fuel, Search } from "lucide-react";
+import { AlertTriangle, BookOpen, Send, ChevronDown, ChevronUp, Copy, X, Fuel, Search } from "lucide-react";
 import { formatResult, isReadMethod, isWriteMethod, getReadableContractError } from "@/lib/contract-utils";
 import { addHistory, updateHistory as updateLocalHistory } from "@/lib/local-store";
-
-interface ContractRecord {
-  id: number;
-  name: string;
-  address: string;
-  chainId: number;
-  abi: ethers.InterfaceAbi;
-}
+import type { ContractRecord } from "@/lib/types";
 
 interface ContractInteractViewProps {
   contract: ContractRecord;
@@ -247,9 +240,21 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [methodSearch, setMethodSearch] = useState("");
 
-  const iface = useMemo(() => new ethers.Interface(contract.abi), [contract.abi]);
-  const methods = useMemo(() =>
-    iface.fragments.filter(f => f.type === "function") as ethers.FunctionFragment[], [iface]);
+  const ifaceState = useMemo(() => {
+    try {
+      return { iface: new ethers.Interface(contract.abi), error: null as string | null };
+    } catch (error) {
+      return {
+        iface: null,
+        error: error instanceof Error ? error.message : "ABI 无法解析",
+      };
+    }
+  }, [contract.abi]);
+  const iface = ifaceState.iface;
+  const methods = useMemo(
+    () => (iface ? (iface.fragments.filter(f => f.type === "function") as ethers.FunctionFragment[]) : []),
+    [iface]
+  );
   const readMethods = useMemo(() => methods.filter(isReadMethod), [methods]);
   const writeMethods = useMemo(() => methods.filter(isWriteMethod), [methods]);
   const filterMethods = (items: ethers.FunctionFragment[]) => {
@@ -468,62 +473,79 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
       </div>
 
       <div className="p-5">
-        <div className="flex gap-1 p-1 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)] mb-4" role="tablist" aria-label="方法类型">
-          <button
-            role="tab"
-            aria-selected={activeTab === "read"}
-            className={`flex-1 py-2 text-[12px] font-medium tracking-[0.01em] border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] ${
-              activeTab === "read" ? "bg-[var(--terminal-card)] border-[var(--terminal-blue)] text-[var(--terminal-blue)]" : "border-transparent text-[var(--terminal-text-secondary)]"
-            }`}
-            onClick={() => setActiveTab("read")}
-          >
-            [READ] ({readMethods.length})
-          </button>
-          <button
-            role="tab"
-            aria-selected={activeTab === "write"}
-            className={`flex-1 py-2 text-[12px] font-medium tracking-[0.01em] border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] ${
-              activeTab === "write" ? "bg-[var(--terminal-card)] border-[var(--terminal-blue)] text-[var(--terminal-blue)]" : "border-transparent text-[var(--terminal-text-secondary)]"
-            }`}
-            onClick={() => setActiveTab("write")}
-          >
-            [WRITE] ({writeMethods.length})
-          </button>
-        </div>
-
-        <div className="relative mb-4">
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--terminal-text-secondary)]" aria-hidden="true" />
-          <input
-            type="text"
-            value={methodSearch}
-            onChange={(event) => setMethodSearch(event.target.value)}
-            className="terminal-input pl-9 font-mono text-[13px]"
-            placeholder="按函数名或签名搜索，例如 balanceOf 或 balanceOf(address)"
-            aria-label="搜索合约函数"
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </div>
-
-        <div className="space-y-2 max-h-[500px] overflow-y-auto" role="tabpanel">
-          {currentMethods.length === 0 ? (
-            <p className="text-center py-12 text-[14px] text-[var(--terminal-text-secondary)]">
-              无{activeTab === "read" ? "读" : "写"}方法
+        {!iface ? (
+          <div className="border border-[var(--terminal-red)]/30 bg-[var(--terminal-red)]/5 p-4" role="alert">
+            <div className="mb-2 flex items-center gap-2 text-[var(--terminal-red)]">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <h3 className="text-[13px] font-medium">ABI 无法解析</h3>
+            </div>
+            <p className="text-[12px] leading-relaxed text-[var(--terminal-text-secondary)]">
+              该合约保存的 ABI 不是合法数组，交互面板无法加载。请在左侧合约列表中编辑该合约并粘贴合法的 ABI，或删除后重新导入。
             </p>
-          ) : (
-            currentMethods.map(method => (
-              <MethodItem
-                key={getMethodKey(method)}
-                method={method}
-                isWrite={activeTab === "write"}
-                onExecute={(params) => activeTab === "write" ? executeWrite(method, params) : executeRead(method, params)}
-                onEstimateGas={activeTab === "write" ? (params) => estimateGas(method, params) : undefined}
-                loading={!!loading[getMethodKey(method)]}
-                result={results[getMethodKey(method)]}
+            {ifaceState.error && (
+              <p className="mt-2 break-all font-mono text-[11px] text-[var(--terminal-red)]/80">{ifaceState.error}</p>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-1 p-1 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)] mb-4" role="tablist" aria-label="方法类型">
+              <button
+                role="tab"
+                aria-selected={activeTab === "read"}
+                className={`flex-1 py-2 text-[12px] font-medium tracking-[0.01em] border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] ${
+                  activeTab === "read" ? "bg-[var(--terminal-card)] border-[var(--terminal-blue)] text-[var(--terminal-blue)]" : "border-transparent text-[var(--terminal-text-secondary)]"
+                }`}
+                onClick={() => setActiveTab("read")}
+              >
+                [READ] ({readMethods.length})
+              </button>
+              <button
+                role="tab"
+                aria-selected={activeTab === "write"}
+                className={`flex-1 py-2 text-[12px] font-medium tracking-[0.01em] border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] ${
+                  activeTab === "write" ? "bg-[var(--terminal-card)] border-[var(--terminal-blue)] text-[var(--terminal-blue)]" : "border-transparent text-[var(--terminal-text-secondary)]"
+                }`}
+                onClick={() => setActiveTab("write")}
+              >
+                [WRITE] ({writeMethods.length})
+              </button>
+            </div>
+
+            <div className="relative mb-4">
+              <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--terminal-text-secondary)]" aria-hidden="true" />
+              <input
+                type="text"
+                value={methodSearch}
+                onChange={(event) => setMethodSearch(event.target.value)}
+                className="terminal-input pl-9 font-mono text-[13px]"
+                placeholder="按函数名或签名搜索，例如 balanceOf 或 balanceOf(address)"
+                aria-label="搜索合约函数"
+                autoComplete="off"
+                spellCheck={false}
               />
-            ))
-          )}
-        </div>
+            </div>
+
+            <div className="space-y-2 max-h-[500px] overflow-y-auto" role="tabpanel">
+              {currentMethods.length === 0 ? (
+                <p className="text-center py-12 text-[14px] text-[var(--terminal-text-secondary)]">
+                  无{activeTab === "read" ? "读" : "写"}方法
+                </p>
+              ) : (
+                currentMethods.map(method => (
+                  <MethodItem
+                    key={getMethodKey(method)}
+                    method={method}
+                    isWrite={activeTab === "write"}
+                    onExecute={(params) => activeTab === "write" ? executeWrite(method, params) : executeRead(method, params)}
+                    onEstimateGas={activeTab === "write" ? (params) => estimateGas(method, params) : undefined}
+                    loading={!!loading[getMethodKey(method)]}
+                    result={results[getMethodKey(method)]}
+                  />
+                ))
+              )}
+            </div>
+          </>
+        )}
       </div>
     </animated.div>
   );

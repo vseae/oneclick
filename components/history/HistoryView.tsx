@@ -1,60 +1,35 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAccount } from "wagmi";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { clearHistory as clearLocalHistory, listHistory } from "@/lib/local-store";
+import { clearHistory as clearLocalHistory, type LocalHistoryRecord } from "@/lib/local-store";
+import { historyKeys, useHistory } from "@/lib/queries";
 import { useSpring, animated, useTrail } from "react-spring";
 import { Trash2, Clock } from "lucide-react";
 import { useHydrated } from "@/lib/use-hydrated";
 
-interface HistoryItem {
-  id: number;
-  contractName: string;
-  contractAddress: string;
-  methodName: string;
-  methodType: "read" | "write";
-  params: any[];
-  result?: string;
-  error?: string;
-  txHash?: string;
-  timestamp: string;
-  chainId: number;
-}
-
-export default function HistoryView({ refreshKey }: { refreshKey?: number }) {
+export default function HistoryView() {
   const { chainId } = useAccount();
+  const queryClient = useQueryClient();
   const hydrated = useHydrated();
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: history = [], isPending, error } = useHistory(chainId);
   const [methodFilter, setMethodFilter] = useState<"all" | "read" | "write">("all");
 
-  const fetchHistory = useCallback(async () => {
-    if (!chainId) {
-      setHistory([]);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const data = await listHistory({ chainId });
-      setHistory(data as HistoryItem[]);
-    } catch (error) {
+  useEffect(() => {
+    if (error) {
       console.error("获取历史失败:", error);
-    } finally {
-      setLoading(false);
+      toast.error("获取历史记录失败");
     }
-  }, [chainId]);
-
-  useEffect(() => { void fetchHistory(); }, [fetchHistory, refreshKey]);
+  }, [error]);
 
   const clearHistory = async () => {
     if (!chainId) return;
     if (!confirm("确定清空当前网络历史记录？")) return;
     try {
       await clearLocalHistory(undefined, chainId);
-      setHistory([]);
+      queryClient.setQueryData<LocalHistoryRecord[]>(historyKeys.byChain(chainId), []);
       toast.success("历史记录已清空");
     } catch {
       toast.error("清空失败");
@@ -89,7 +64,7 @@ export default function HistoryView({ refreshKey }: { refreshKey?: number }) {
     } catch { return timestamp; }
   };
 
-  if (loading) {
+  if (isPending) {
     return (
       <div className="terminal-card p-16 flex items-center justify-center" aria-live="polite">
         <div className="w-6 h-6 border-2 border-[var(--terminal-blue)] border-t-transparent rounded-full animate-spin" role="status">
