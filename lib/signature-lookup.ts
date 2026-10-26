@@ -3,6 +3,7 @@ import { listContractsByChainId } from "./local-store";
 
 export type SignatureKind = "function" | "event";
 export type SignatureSource = "local" | "4byte" | "sourcify";
+export type SignatureCandidateKind = "function" | "event" | "error" | "ambiguous";
 
 export interface NormalizedSignature {
   kind: SignatureKind;
@@ -12,6 +13,7 @@ export interface NormalizedSignature {
 export interface SignatureCandidate {
   name: string;
   source: SignatureSource;
+  kind: SignatureCandidateKind;
   extra?: string;
 }
 
@@ -54,8 +56,26 @@ export function normalizeSignatureInput(input: string): NormalizedSignature {
   throw new Error("无效签名格式：请输入 4 字节函数选择器或 32 字节事件 Topic");
 }
 
+/**
+ * 4-byte selectors are shared by functions and custom errors, and neither
+ * 4byte.directory nor Sourcify exposes the ABI kind in their lookup response.
+ * Only the Solidity built-in errors can be identified remotely; every other
+ * remote 4-byte result stays ambiguous.
+ */
+const BUILTIN_ERROR_SIGNATURES = new Set(["Error(string)", "Panic(uint256)"]);
+
+function classifyRemoteCandidate(
+  normalized: NormalizedSignature,
+  name: string
+): SignatureCandidateKind {
+  if (normalized.kind === "event") {
+    return "event";
+  }
+  return BUILTIN_ERROR_SIGNATURES.has(name) ? "error" : "ambiguous";
+}
+
 function candidateKey(candidate: SignatureCandidate): string {
-  return `${candidate.source}:${candidate.name.toLowerCase()}`;
+  return `${candidate.source}:${candidate.kind}:${candidate.name.toLowerCase()}`;
 }
 
 function deduplicateCandidates(candidates: SignatureCandidate[]): SignatureCandidate[] {
@@ -92,6 +112,7 @@ async function lookupFromLocal(ctx: SourceContext): Promise<SignatureCandidate[]
           output.push({
             name: fragment.format("sighash"),
             source: "local",
+            kind: "function",
             extra: `${contract.name} (${contract.address})`,
           });
         }
@@ -101,6 +122,7 @@ async function lookupFromLocal(ctx: SourceContext): Promise<SignatureCandidate[]
           output.push({
             name: fragment.format("sighash"),
             source: "local",
+            kind: "error",
             extra: `${contract.name} (${contract.address})`,
           });
         }
@@ -111,6 +133,7 @@ async function lookupFromLocal(ctx: SourceContext): Promise<SignatureCandidate[]
           output.push({
             name: fragment.format("sighash"),
             source: "local",
+            kind: "event",
             extra: `${contract.name} (${contract.address})`,
           });
         }
@@ -151,6 +174,7 @@ async function lookupFrom4byte(ctx: SourceContext): Promise<SignatureCandidate[]
     .map((name) => ({
       name,
       source: "4byte" as const,
+      kind: classifyRemoteCandidate(ctx.normalized, name),
     }));
 
   return deduplicateCandidates(candidates);
@@ -197,6 +221,7 @@ async function lookupFromSourcify(ctx: SourceContext): Promise<SignatureCandidat
       return {
         name,
         source: "sourcify" as const,
+        kind: classifyRemoteCandidate(ctx.normalized, name),
         extra: item.hasVerifiedContract ? "verified" : "unverified",
       };
     })

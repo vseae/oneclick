@@ -94,9 +94,30 @@ describe("signature lookup", () => {
     const result = await mod.lookupSignatureCandidates("0xa9059cbb", 1);
 
     expect(result.normalized.kind).toBe("function");
-    expect(result.candidates.some((item) => item.name === "transfer(address,uint256)" && item.source === "local")).toBe(true);
-    expect(result.candidates.some((item) => item.name === "workMyDirefulOwner(uint256,uint256)" && item.source === "4byte")).toBe(true);
-    expect(result.candidates.some((item) => item.name === "transfer(address,uint256)" && item.source === "sourcify")).toBe(true);
+    expect(
+      result.candidates.some(
+        (item) =>
+          item.name === "transfer(address,uint256)" &&
+          item.source === "local" &&
+          item.kind === "function"
+      )
+    ).toBe(true);
+    expect(
+      result.candidates.some(
+        (item) =>
+          item.name === "workMyDirefulOwner(uint256,uint256)" &&
+          item.source === "4byte" &&
+          item.kind === "ambiguous"
+      )
+    ).toBe(true);
+    expect(
+      result.candidates.some(
+        (item) =>
+          item.name === "transfer(address,uint256)" &&
+          item.source === "sourcify" &&
+          item.kind === "ambiguous"
+      )
+    ).toBe(true);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0]?.[0]).toContain("4byte.directory");
@@ -130,6 +151,7 @@ describe("signature lookup", () => {
 
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0].source).toBe("sourcify");
+    expect(result.candidates[0].kind).toBe("error");
     expect(result.errors.some((err) => err.source === "4byte")).toBe(true);
   });
 
@@ -177,6 +199,118 @@ describe("signature lookup", () => {
 
     expect(bySource["4byte"]).toBe(1);
     expect(bySource["sourcify"]).toBe(1);
+    expect(result.candidates.every((item) => item.kind === "error")).toBe(true);
+  });
+
+  it("labels local functions, custom errors and events", async () => {
+    vi.doMock("../../lib/local-store", () => ({
+      listContractsByChainId: vi.fn(async () => [
+        {
+          id: 1,
+          name: "TokenA",
+          address: "0x1111111111111111111111111111111111111111",
+          chainId: 1,
+          abi: [
+            {
+              type: "function",
+              name: "transfer",
+              stateMutability: "nonpayable",
+              inputs: [
+                { name: "to", type: "address" },
+                { name: "amount", type: "uint256" },
+              ],
+              outputs: [{ name: "", type: "bool" }],
+            },
+            {
+              type: "error",
+              name: "OwnableUnauthorizedAccount",
+              inputs: [{ name: "account", type: "address" }],
+            },
+            {
+              type: "event",
+              name: "Transfer",
+              anonymous: false,
+              inputs: [
+                { name: "from", type: "address", indexed: true },
+                { name: "to", type: "address", indexed: true },
+                { name: "value", type: "uint256", indexed: false },
+              ],
+            },
+          ],
+        },
+      ]),
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ results: [], ok: true, result: { function: {}, event: {} } }),
+      })) as unknown as typeof fetch
+    );
+
+    const mod = await import("../../lib/signature-lookup");
+
+    const functionResult = await mod.lookupSignatureCandidates("0xa9059cbb", 1);
+    expect(functionResult.candidates.find((item) => item.source === "local")).toMatchObject({
+      name: "transfer(address,uint256)",
+      kind: "function",
+    });
+
+    const errorResult = await mod.lookupSignatureCandidates("0x118cdaa7", 1);
+    expect(errorResult.candidates.find((item) => item.source === "local")).toMatchObject({
+      name: "OwnableUnauthorizedAccount(address)",
+      kind: "error",
+    });
+
+    const eventResult = await mod.lookupSignatureCandidates(
+      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+      1
+    );
+    expect(eventResult.candidates.find((item) => item.source === "local")).toMatchObject({
+      name: "Transfer(address,address,uint256)",
+      kind: "event",
+    });
+  });
+
+  it("labels remote event results as events", async () => {
+    vi.doMock("../../lib/local-store", () => ({
+      listContractsByChainId: vi.fn(async () => []),
+    }));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [{ text_signature: "Transfer(address,address,uint256)" }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          result: {
+            function: {},
+            event: {
+              "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef": [
+                { name: "Transfer(address,address,uint256)", hasVerifiedContract: true },
+              ],
+            },
+          },
+        }),
+      });
+
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const mod = await import("../../lib/signature-lookup");
+    const result = await mod.lookupSignatureCandidates(
+      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+      1
+    );
+
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates.every((item) => item.kind === "event")).toBe(true);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("event-signatures");
   });
 
   it("queries local signatures from the selected chain only", async () => {
