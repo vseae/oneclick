@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Plug } from "lucide-react";
 import Header from "@/components/layout/Header";
 import SideNav from "@/components/layout/SideNav";
+import ToolPanel from "@/components/layout/ToolPanel";
 import { contractKeys, historyKeys, useContracts } from "@/lib/queries";
 import type { ContractRecord } from "@/lib/types";
 
@@ -113,40 +114,51 @@ export default function Home() {
 
       <main className="min-w-0 pt-14 md:pl-64">
         <div className="space-y-2 p-2 md:p-3">
-          {!isConnected ? (
-            <EmptyState
-              icon={<Plug size={24} className="text-[var(--terminal-text-secondary)]" />}
-              title="Connect Wallet"
-              subtitle="请连接钱包后加载合约面板与历史记录"
-            />
-          ) : (
-            <div className="terminal-main-grid">
-              <div className="min-w-0">
-                {visiblePanelIds.map((id) => {
-                  const contract = contractById.get(id);
-                  if (!contract) return null;
-                  const isCurrent = visibleCurrentContract?.id === id;
-                  return (
-                    <div key={id} className={isCurrent ? "" : "hidden"} aria-hidden={!isCurrent}>
-                      <ContractInteractView
-                        contract={contract}
-                        onClose={handleClosePanel}
-                        onHistoryUpdate={handleHistoryUpdate}
-                      />
-                    </div>
-                  );
-                })}
-                {!visibleCurrentContract && (
-                  <EmptyState
-                    icon={<Plug size={24} className="text-[var(--terminal-text-secondary)]" />}
-                    title="Select Contract"
-                    subtitle="请从左侧合约列表选择一个合约以打开交互面板"
-                  />
-                )}
-              </div>
-              <div className="min-w-0"><HistoryView /></div>
+          <div className="terminal-main-grid">
+            <div className="terminal-main-contract min-w-0">
+              {!isConnected ? (
+                <EmptyState
+                  icon={<Plug size={24} className="text-[var(--terminal-text-secondary)]" />}
+                  title="Connect Wallet"
+                  subtitle="请连接钱包后加载合约面板与历史记录"
+                />
+              ) : (
+                <>
+                  {visiblePanelIds.map((id) => {
+                    const contract = contractById.get(id);
+                    if (!contract) return null;
+                    const isCurrent = visibleCurrentContract?.id === id;
+                    return (
+                      <div key={id} className={isCurrent ? "" : "hidden"} aria-hidden={!isCurrent}>
+                        <ContractInteractView
+                          contract={contract}
+                          onClose={handleClosePanel}
+                          onHistoryUpdate={handleHistoryUpdate}
+                        />
+                      </div>
+                    );
+                  })}
+                  {!visibleCurrentContract && (
+                    <EmptyState
+                      icon={<Plug size={24} className="text-[var(--terminal-text-secondary)]" />}
+                      title="Select Contract"
+                      subtitle="请从左侧合约列表选择一个合约以打开交互面板"
+                    />
+                  )}
+                </>
+              )}
             </div>
-          )}
+
+            <div className="terminal-main-tools min-w-0">
+              <ToolPanel />
+            </div>
+
+            {isConnected && (
+              <div className="terminal-main-logs min-w-0">
+                <HistoryView />
+              </div>
+            )}
+          </div>
         </div>
       </main>
     </div>

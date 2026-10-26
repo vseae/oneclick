@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import ToolMenu from "@/components/layout/ToolMenu";
 
 const CustomConnectButton = dynamic(() => import("@/components/CustomConnectButton"), {
   ssr: false,
@@ -15,13 +14,12 @@ export default function Header() {
           <div className="truncate text-[28px] leading-none font-semibold tracking-[0.01em] text-[var(--terminal-blue)] [font-family:IBM_Plex_Mono,ui-monospace,monospace]">
             OneClick
           </div>
-          <p className="mt-1 hidden text-[11px] font-medium tracking-[0.02em] text-[var(--terminal-text-secondary)] md:block">
-            OneClick
+          <p className="mt-1 hidden truncate text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--terminal-text-secondary)] md:block">
+            Smart Contract Interaction Tool
           </p>
         </div>
 
         <div className="flex min-w-0 items-center justify-end gap-2">
-          <ToolMenu />
           <CustomConnectButton />
         </div>
       </div>

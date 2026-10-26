@@ -420,12 +420,43 @@ body {
 .terminal-main-grid {
   display: grid;
   grid-template-columns: 1fr;
+  grid-template-areas:
+    "contract"
+    "tools"
+    "logs";
   gap: 8px;
+  align-items: start;
+}
+
+.terminal-main-contract {
+  grid-area: contract;
+  min-width: 0;
+}
+
+.terminal-main-tools {
+  grid-area: tools;
+  min-width: 0;
+}
+
+.terminal-main-logs {
+  grid-area: logs;
+  min-width: 0;
 }
 
 @media (min-width: 1280px) {
   .terminal-main-grid {
-    grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+    grid-template-columns: minmax(0, 2fr) minmax(380px, 1fr);
+    grid-template-areas:
+      "contract tools"
+      "logs tools";
+  }
+
+  .terminal-main-tools {
+    position: sticky;
+    top: 72px;
+    max-height: calc(100vh - 88px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 
