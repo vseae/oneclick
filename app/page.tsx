@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useAccount } from "wagmi";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Dot, Plug, Radio } from "lucide-react";
+import { Plug } from "lucide-react";
 import Header from "@/components/layout/Header";
 import SideNav from "@/components/layout/SideNav";
 import { contractKeys, historyKeys, useContracts } from "@/lib/queries";
@@ -113,22 +113,6 @@ export default function Home() {
 
       <main className="min-w-0 pt-14 md:pl-64">
         <div className="space-y-2 p-2 md:p-3">
-          <section className="terminal-card bg-[var(--terminal-card)] px-4 py-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="terminal-section-title">
-                <Radio size={14} aria-hidden="true" />
-                <span>Execution Environment</span>
-              </div>
-              <div className="flex items-center gap-3 text-[11px] text-[var(--terminal-text-secondary)]">
-                <span className="inline-flex items-center gap-1 tracking-[0.01em]">
-                  <Dot size={18} className="text-[var(--terminal-green)]" />
-                  Live
-                </span>
-                <span className="terminal-chip">Target: Smart Contracts</span>
-              </div>
-            </div>
-          </section>
-
           {!isConnected ? (
             <EmptyState
               icon={<Plug size={24} className="text-[var(--terminal-text-secondary)]" />}

@@ -1,20 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import { ethers } from "ethers";
+import { useMemo, useState } from "react";
 import { useSpring, animated } from "react-spring";
-import { Copy } from "lucide-react";
-import { toast } from "sonner";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import ConvertField from "@/components/tools/ConvertField";
+import ToolHeader from "@/components/tools/ToolHeader";
+import { ETH_UNITS, formatAmount, parseAmount, type EthUnit } from "@/lib/convert";
 
-const units = [
-  { name: "Wei", decimals: 0 },
-  { name: "GWei", decimals: 9 },
-  { name: "Ether", decimals: 18 },
-];
+/** The three denominations that cover day to day use; the rest stay collapsed. */
+const PRIMARY_UNIT_NAMES = ["Wei", "GWei", "Ether"];
+
+const DEFAULT_UNIT = "Ether";
+const DEFAULT_VALUE = "1";
 
 export default function UnitConverter() {
-  const [inputValue, setInputValue] = useState("1");
-  const [inputUnit, setInputUnit] = useState("Ether");
+  const [activeUnit, setActiveUnit] = useState(DEFAULT_UNIT);
+  const [draft, setDraft] = useState(DEFAULT_VALUE);
+  const [showAllUnits, setShowAllUnits] = useState(false);
 
   const fadeIn = useSpring({
     from: { opacity: 0, transform: "translateY(8px)" },
@@ -22,130 +24,104 @@ export default function UnitConverter() {
     config: { tension: 280, friction: 24 },
   });
 
-  const handleInputChange = (value: string) => {
-    if (value === "" || /^\d*\.?\d*$/.test(value)) setInputValue(value);
+  const active = ETH_UNITS.find((unit) => unit.name === activeUnit) ?? ETH_UNITS[0];
+  const parsed = draft.trim() === "" ? null : parseAmount(draft, active.decimals);
+  const wei = parsed?.ok ? parsed.value : null;
+  const activeError = parsed && !parsed.ok ? parsed.error : null;
+
+  const { primaryUnits, extraUnits } = useMemo(
+    () => ({
+      primaryUnits: ETH_UNITS.filter((unit) => PRIMARY_UNIT_NAMES.includes(unit.name)),
+      extraUnits: ETH_UNITS.filter((unit) => !PRIMARY_UNIT_NAMES.includes(unit.name)),
+    }),
+    []
+  );
+
+  /** The edited field keeps the user's raw text; every other field is derived. */
+  const valueOf = (unit: EthUnit) => {
+    if (unit.name === activeUnit) return draft;
+    if (wei === null) return "";
+    return formatAmount(wei, unit.decimals);
   };
 
-  const convertToWei = (value: string, fromUnit: string): bigint => {
-    if (!value || value === "0" || value === ".") return BigInt(0);
-    try {
-      if (fromUnit === "Ether") return ethers.parseEther(value);
-      if (fromUnit === "GWei") return ethers.parseUnits(value, 9);
-      return BigInt(value);
-    } catch { return BigInt(0); }
+  const focusUnit = (unit: EthUnit) => {
+    if (unit.name === activeUnit) return;
+    setActiveUnit(unit.name);
+    setDraft(wei === null ? "" : formatAmount(wei, unit.decimals));
   };
 
-  const convertFromWei = (wei: bigint, toUnit: string): string => {
-    if (wei === BigInt(0)) return "0";
-    try {
-      if (toUnit === "Ether") return ethers.formatEther(wei);
-      if (toUnit === "GWei") return ethers.formatUnits(wei, 9);
-      return wei.toString();
-    } catch { return "0"; }
-  };
+  const fieldFor = (unit: EthUnit, hint?: string) => (
+    <ConvertField
+      key={unit.name}
+      label={unit.name}
+      exponent={unit.decimals}
+      value={valueOf(unit)}
+      onChange={(next) => {
+        setActiveUnit(unit.name);
+        setDraft(next);
+      }}
+      onFocus={() => focusUnit(unit)}
+      active={unit.name === activeUnit}
+      error={unit.name === activeUnit ? activeError : null}
+      hint={hint}
+    />
+  );
 
-  const weiValue = convertToWei(inputValue, inputUnit);
-
-  const copyValue = (val: string) => {
-    navigator.clipboard.writeText(val);
-    toast.success("[COPIED] 已复制到剪贴板");
+  const reset = () => {
+    setActiveUnit(DEFAULT_UNIT);
+    setDraft(DEFAULT_VALUE);
   };
 
   return (
     <animated.div style={fadeIn} className="terminal-card">
-      <div className="terminal-panel-header flex items-center justify-between gap-3">
-        <div>
-          <h2 className="terminal-section-title">[UNIT_CONVERTER]</h2>
-          <p className="text-[12px] text-[var(--terminal-text-secondary)] mt-1">
-            Convert between Wei, GWei and Ether
+      <ToolHeader
+        title="UNIT_CONVERTER"
+        subtitle="Wei / GWei / Ether 双向换算，编辑任意一栏即可联动"
+        chip="ETH UNITS"
+      />
+
+      <div className="terminal-panel-body space-y-3">
+        <p className="text-[11px] leading-relaxed text-[var(--terminal-text-secondary)]">
+          支持粘贴 <code className="font-mono text-[var(--terminal-text)]">0x</code> 十六进制（按当前一栏的单位解析），
+          全部换算走 BigInt，不经过浮点数。
+        </p>
+
+        <div className="space-y-2">{primaryUnits.map((unit) => fieldFor(unit))}</div>
+
+        <button
+          type="button"
+          onClick={() => setShowAllUnits((current) => !current)}
+          className="terminal-btn terminal-btn-secondary w-full py-2 text-[11px]"
+          aria-expanded={showAllUnits}
+        >
+          {showAllUnits ? (
+            <>
+              <ChevronUp size={13} aria-hidden="true" /> 收起额外单位
+            </>
+          ) : (
+            <>
+              <ChevronDown size={13} aria-hidden="true" /> 展开全部 {ETH_UNITS.length} 个单位
+            </>
+          )}
+        </button>
+
+        {showAllUnits && (
+          <div className="grid max-h-[36vh] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+            {extraUnits.map((unit) => fieldFor(unit))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--terminal-separator)] pt-3">
+          <p className="text-[10px] leading-snug text-[var(--terminal-text-secondary)]">
+            1 Ether = 10¹⁸ Wei = 10⁹ GWei
           </p>
-        </div>
-        <span className="terminal-chip">PRECISION</span>
-      </div>
-
-      <div className="terminal-panel-body space-y-4">
-        <div className="border border-[var(--terminal-separator)] bg-[var(--terminal-fill)] p-3 space-y-3">
-          <p className="text-[11px] tracking-[0.08em] uppercase text-[var(--terminal-text-secondary)]">[INPUT]</p>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label htmlFor="unit-input" className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1.5">Amount</label>
-              <div className="terminal-prompt-wrap">
-                <input
-                  id="unit-input"
-                  type="text"
-                  inputMode="decimal"
-                  name="unit-value"
-                  value={inputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
-                  className="terminal-input font-mono tabular-nums"
-                  placeholder="0.0"
-                  autoComplete="off"
-                />
-              </div>
-            </div>
-            <div className="w-32">
-              <label htmlFor="unit-select" className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1.5">Unit</label>
-              <select
-                id="unit-select"
-                name="unit-type"
-                value={inputUnit}
-                onChange={(e) => setInputUnit(e.target.value)}
-                className="terminal-input cursor-pointer"
-              >
-                {units.map((u) => (
-                  <option key={u.name} value={u.name}>{u.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div className="border border-[var(--terminal-separator)]">
-          <div className="px-3 py-2 border-b border-[var(--terminal-separator)] bg-[var(--terminal-fill)] flex items-center justify-between">
-            <p className="text-[11px] tracking-[0.08em] uppercase text-[var(--terminal-text-secondary)]">[RESULTS]</p>
-            <button
-              type="button"
-              onClick={() => {
-                setInputValue("1");
-                setInputUnit("Ether");
-              }}
-              className="terminal-btn terminal-btn-secondary px-2.5 py-1.5 text-[10px]"
-            >
-              RESET
-            </button>
-          </div>
-          <div className="space-y-0">
-            {units.map((unit) => {
-              const converted = convertFromWei(weiValue, unit.name);
-              const isActive = unit.name === inputUnit;
-              return (
-                <div
-                  key={unit.name}
-                  className={`flex items-center justify-between p-3.5 border-t transition-colors first:border-t-0 ${
-                    isActive
-                      ? "border-[var(--terminal-blue)]/30 bg-[var(--terminal-blue)]/5"
-                      : "border-[var(--terminal-separator)] bg-transparent"
-                  }`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-[12px] font-bold tracking-[0.08em] uppercase ${isActive ? "text-[var(--terminal-blue)]" : "text-[var(--terminal-text-secondary)]"}`}>
-                      {unit.name}
-                    </p>
-                    <p className="text-[14px] font-mono font-medium text-[var(--terminal-text)] mt-1 break-all tabular-nums">
-                      {converted}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => copyValue(converted)}
-                    className="terminal-btn terminal-btn-secondary h-8 w-8 p-0 shrink-0"
-                    aria-label={`复制 ${unit.name} 值`}
-                  >
-                    <Copy size={13} className="text-[var(--terminal-text-secondary)]" aria-hidden="true" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            onClick={reset}
+            className="terminal-btn terminal-btn-secondary shrink-0 px-2.5 py-1.5 text-[10px]"
+          >
+            RESET
+          </button>
         </div>
       </div>
     </animated.div>

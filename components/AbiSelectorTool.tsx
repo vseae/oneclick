@@ -174,20 +174,18 @@ export default function AbiSelectorTool() {
                 ))}
                 </div>
                 <div className="relative flex-1 min-w-[220px]">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--terminal-text-secondary)]" aria-hidden="true" />
-                  <div className="terminal-prompt-wrap">
-                    <input
-                      type="search"
-                      name="selector-search"
-                      placeholder="name / signature / selector"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      className="terminal-input pl-8 text-[13px]"
-                      aria-label="搜索选择器"
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
-                  </div>
+                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--terminal-text-secondary)]" aria-hidden="true" />
+                  <input
+                    type="search"
+                    name="selector-search"
+                    placeholder="name / signature / selector"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="terminal-input terminal-input-search text-[13px]"
+                    aria-label="搜索选择器"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
                 </div>
                 <button className="terminal-btn terminal-btn-secondary text-[12px]" onClick={copyAll}>
                   <Copy size={13} aria-hidden="true" />

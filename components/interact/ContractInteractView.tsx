@@ -517,7 +517,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
                 type="text"
                 value={methodSearch}
                 onChange={(event) => setMethodSearch(event.target.value)}
-                className="terminal-input pl-9 font-mono text-[13px]"
+                className="terminal-input terminal-input-search font-mono text-[13px]"
                 placeholder="按函数名或签名搜索，例如 balanceOf 或 balanceOf(address)"
                 aria-label="搜索合约函数"
                 autoComplete="off"

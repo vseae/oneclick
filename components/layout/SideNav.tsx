@@ -287,7 +287,7 @@ export default function SideNav({
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            className="terminal-input h-8 pl-8 pr-2 text-[12px]"
+            className="terminal-input terminal-input-search h-8 pr-2 text-[12px]"
             placeholder="搜索名称或地址..."
             aria-label="搜索合约名称或地址"
             autoComplete="off"

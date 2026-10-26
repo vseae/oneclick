@@ -232,6 +232,11 @@ body {
   color: var(--terminal-text-secondary);
 }
 
+/* Inputs with an absolutely positioned leading icon need room for it. */
+.terminal-input-search {
+  padding-left: 36px;
+}
+
 .terminal-segment {
   display: inline-flex;
   background: var(--terminal-fill);
