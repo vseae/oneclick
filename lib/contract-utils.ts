@@ -106,6 +106,37 @@ export function isWriteMethod(method: ethers.FunctionFragment): boolean {
   );
 }
 
+/**
+ * Payable detection has to look at both the modern `stateMutability` and the
+ * legacy `payable` flag: raw ABIs written before Solidity 0.6 often only carry
+ * the boolean, and ethers can normalise those to `nonpayable`.
+ */
+export function isPayableMethod(method: ethers.FunctionFragment): boolean {
+  const legacy = (method as unknown as { payable?: boolean }).payable;
+  return method.stateMutability === "payable" || legacy === true;
+}
+
+/**
+ * Parse one raw input string into the JavaScript value ethers expects for the
+ * given ABI type. Shared by the interaction panel and the encoder/batch tools so
+ * every entry point accepts the same syntax.
+ */
+export function parseMethodParam(type: string, raw: string): unknown {
+  if (type.includes("[]") || type.startsWith("tuple")) return JSON.parse(raw || "[]");
+  if (type.startsWith("uint") || type.startsWith("int")) return BigInt(raw || "0");
+  if (type === "bool") return raw.toLowerCase() === "true";
+  return raw;
+}
+
+export function parseMethodParams(
+  method: ethers.FunctionFragment,
+  raw: string[]
+): unknown[] {
+  return method.inputs.map((input, index) =>
+    parseMethodParam(input.type, raw[index] ?? "")
+  );
+}
+
 export type SelectorType = "function" | "event" | "error";
 
 export interface SelectorItem {

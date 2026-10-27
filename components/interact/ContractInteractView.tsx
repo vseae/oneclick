@@ -5,10 +5,32 @@ import { ethers } from "ethers";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
-import { AlertTriangle, BookOpen, Send, ChevronDown, ChevronUp, Copy, X, Fuel, Search } from "lucide-react";
-import { formatResult, isReadMethod, isWriteMethod, getReadableContractError } from "@/lib/contract-utils";
+import {
+  AlertTriangle,
+  BookOpen,
+  Send,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  X,
+  Fuel,
+  Search,
+  FlaskConical,
+} from "lucide-react";
+import {
+  formatResult,
+  isReadMethod,
+  isWriteMethod,
+  isPayableMethod,
+  getReadableContractError,
+  parseMethodParams,
+} from "@/lib/contract-utils";
+import { parseAmount } from "@/lib/convert";
+import { formatValueForDecimals, useValueDecimals } from "@/lib/value-decimals";
 import { addHistory, updateHistory as updateLocalHistory } from "@/lib/local-store";
 import type { ContractRecord } from "@/lib/types";
+import ValueDisplay from "@/components/ValueDisplay";
+import ValueDecimalsControl from "@/components/ValueDecimalsControl";
 
 interface ContractInteractViewProps {
   contract: ContractRecord;
@@ -22,6 +44,17 @@ interface GasEstimate {
   totalCost: string;
 }
 
+/** Optional transaction overrides collected by a method form. */
+interface ExecuteOptions {
+  /** Decimal wei string; absent means no ETH is attached. */
+  valueWei?: string;
+}
+
+interface SimulationResult {
+  ok: boolean;
+  message: string;
+}
+
 interface HistoryPayload {
   contractId: number;
   contractName: string;
@@ -32,6 +65,8 @@ interface HistoryPayload {
   result?: string;
   error?: string;
   txHash?: string;
+  /** Decimal wei string for payable writes. */
+  value?: string;
   chainId: number;
 }
 
@@ -39,18 +74,24 @@ function getMethodKey(method: ethers.FunctionFragment) {
   return method.selector;
 }
 
+function buildOverrides(options?: ExecuteOptions) {
+  return options?.valueWei ? { value: BigInt(options.valueWei) } : {};
+}
+
 function MethodItem({
   method,
   isWrite,
   onExecute,
   onEstimateGas,
+  onSimulate,
   loading,
   result,
 }: {
   method: ethers.FunctionFragment;
   isWrite: boolean;
-  onExecute: (params: string[]) => void;
-  onEstimateGas?: (params: string[]) => Promise<GasEstimate>;
+  onExecute: (params: string[], options: ExecuteOptions) => void;
+  onEstimateGas?: (params: string[], options: ExecuteOptions) => Promise<GasEstimate>;
+  onSimulate?: (params: string[], options: ExecuteOptions) => Promise<SimulationResult>;
   loading: boolean;
   result?: string;
 }) {
@@ -59,6 +100,42 @@ function MethodItem({
   const [gasEstimate, setGasEstimate] = useState<GasEstimate | null>(null);
   const [gasError, setGasError] = useState<string | null>(null);
   const [estimating, setEstimating] = useState(false);
+  const [valueInput, setValueInput] = useState("");
+  const [simulation, setSimulation] = useState<SimulationResult | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+  const decimals = useValueDecimals();
+  const convertedResult = result ? formatValueForDecimals(result, decimals) : null;
+
+  const payable = isPayableMethod(method);
+
+  // Payable methods need an ETH amount; it is parsed with the same helper the
+  // unit converter uses so `0.1` and `0x…` both work.
+  const valueParse = payable && valueInput.trim() ? parseAmount(valueInput, 18) : null;
+  const valueError = valueParse && !valueParse.ok ? valueParse.error : null;
+
+  const buildOptions = (): ExecuteOptions =>
+    valueParse?.ok && valueParse.value > BigInt(0)
+      ? { valueWei: valueParse.value.toString() }
+      : {};
+
+  const busy = loading || simulating;
+
+  /**
+   * Copy the text shown in the result body: when a display precision is set the
+   * human readable conversion is copied, otherwise the raw return value is.
+   */
+  const copyResult = async () => {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(convertedResult ?? result);
+      toast.success(
+        convertedResult !== null ? "[COPIED] 已复制转换值" : "[COPIED] 已复制原始值"
+      );
+    } catch {
+      toast.error("[COPY_FAILED] 复制失败");
+    }
+  };
 
   const handleEstimateGas = async () => {
     if (!onEstimateGas) return;
@@ -66,18 +143,58 @@ function MethodItem({
     setGasEstimate(null);
     setGasError(null);
     try {
-      const estimate = await onEstimateGas(params);
-      setGasEstimate(estimate);
+      setGasEstimate(await onEstimateGas(params, buildOptions()));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Gas 估算失败";
-      setGasError(message);
+      setGasError(error instanceof Error ? error.message : "Gas 估算失败");
     } finally {
       setEstimating(false);
     }
   };
 
+  const handleSimulate = async () => {
+    if (!onSimulate) return;
+    setSimulating(true);
+    setSimulation(null);
+    setPreflightError(null);
+    try {
+      setSimulation(await onSimulate(params, buildOptions()));
+    } catch (error) {
+      setSimulation({
+        ok: false,
+        message: error instanceof Error ? error.message : "预演失败",
+      });
+    } finally {
+      setSimulating(false);
+    }
+  };
+
+  /**
+   * Every write is preflighted with an `eth_call` first: a revert is shown
+   * before the wallet ever opens, and the user can still choose to force it.
+   */
+  const handleSend = async () => {
+    if (!onSimulate) {
+      onExecute(params, buildOptions());
+      return;
+    }
+    setPreflightError(null);
+    setSimulating(true);
+    try {
+      const sim = await onSimulate(params, buildOptions());
+      if (!sim.ok) {
+        setPreflightError(sim.message);
+        toast.error("预演失败，交易未发送");
+        return;
+      }
+      setSimulation(sim);
+      onExecute(params, buildOptions());
+    } finally {
+      setSimulating(false);
+    }
+  };
+
   const contentSpring = useSpring({
-    maxHeight: expanded ? 500 : 0,
+    maxHeight: expanded ? 900 : 0,
     opacity: expanded ? 1 : 0,
     config: { tension: 280, friction: 24 },
   });
@@ -98,6 +215,11 @@ function MethodItem({
           {method.inputs.length > 0 && (
             <span className="text-[12px] text-[var(--terminal-text-secondary)]">
               ({method.inputs.length} params)
+            </span>
+          )}
+          {payable && (
+            <span className="border border-[var(--terminal-orange)]/40 bg-[var(--terminal-orange)]/10 px-1.5 py-0.5 text-[10px] font-medium tracking-[0.06em] text-[var(--terminal-orange)]">
+              PAYABLE
             </span>
           )}
         </div>
@@ -134,12 +256,48 @@ function MethodItem({
               </div>
             </div>
           ))}
+
+          {payable && (
+            <div>
+              <label htmlFor={`${method.name}-value`} className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1">
+                Value
+                <span className="ml-1 opacity-60">(ETH)</span>
+              </label>
+              <div className="terminal-prompt-wrap">
+                <input
+                  id={`${method.name}-value`}
+                  name={`${method.name}-value`}
+                  className="terminal-input font-mono text-[13px]"
+                  placeholder="0.0"
+                  inputMode="decimal"
+                  value={valueInput}
+                  onChange={(e) => setValueInput(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-invalid={Boolean(valueError)}
+                />
+              </div>
+              {valueError ? (
+                <p className="mt-1 text-[11px] text-[var(--terminal-red)]" role="alert">
+                  {valueError}
+                </p>
+              ) : (
+                <p className="mt-1 text-[10px] text-[var(--terminal-text-secondary)]">
+                  payable 方法随交易附带的 ETH，留空即为 0
+                  {valueParse?.ok && valueParse.value > BigInt(0)
+                    ? ` · ${valueParse.value.toString()} wei`
+                    : ""}
+                </p>
+              )}
+            </div>
+          )}
+
           {isWrite && onEstimateGas ? (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
-                className="terminal-btn flex-1 terminal-btn-secondary"
+                className="terminal-btn terminal-btn-secondary min-w-[104px] flex-1"
                 onClick={handleEstimateGas}
-                disabled={estimating || loading}
+                disabled={estimating || busy || Boolean(valueError)}
               >
                 {estimating ? (
                   <span className="flex items-center gap-2">
@@ -147,13 +305,27 @@ function MethodItem({
                     Estimating...
                   </span>
                 ) : (
-                  <><Fuel size={14} aria-hidden="true" /> Estimate Gas</>
+                  <><Fuel size={14} aria-hidden="true" /> Estimate</>
                 )}
               </button>
               <button
-                className="terminal-btn flex-1 bg-[var(--terminal-orange)] text-white"
-                onClick={() => onExecute(params)}
-                disabled={loading}
+                className="terminal-btn terminal-btn-secondary min-w-[84px] flex-1"
+                onClick={handleSimulate}
+                disabled={simulating || loading || Boolean(valueError)}
+              >
+                {simulating ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-4 border-2 border-[var(--terminal-text-secondary)] border-t-transparent rounded-full animate-spin" role="status" aria-label="预演中…" />
+                    预演中
+                  </span>
+                ) : (
+                  <><FlaskConical size={14} aria-hidden="true" /> 预演</>
+                )}
+              </button>
+              <button
+                className="terminal-btn min-w-[110px] flex-1 bg-[var(--terminal-orange)] text-white disabled:opacity-50"
+                onClick={handleSend}
+                disabled={busy || Boolean(valueError)}
               >
                 {loading ? (
                   <span className="flex items-center gap-2">
@@ -168,7 +340,7 @@ function MethodItem({
           ) : (
             <button
               className={`terminal-btn w-full ${isWrite ? "bg-[var(--terminal-orange)] text-white" : "terminal-btn-primary"}`}
-              onClick={() => onExecute(params)}
+              onClick={() => onExecute(params, buildOptions())}
               disabled={loading}
             >
               {loading ? (
@@ -181,6 +353,26 @@ function MethodItem({
               )}
             </button>
           )}
+
+          {preflightError && (
+            <div className="border border-[var(--terminal-red)]/30 bg-[var(--terminal-red)]/5 p-2.5" role="alert">
+              <p className="text-[11px] font-medium text-[var(--terminal-red)]">
+                预演失败 · 交易未发送
+              </p>
+              <p className="mt-1 break-all font-mono text-[11px] text-[var(--terminal-red)]/80">
+                {preflightError}
+              </p>
+              <button
+                type="button"
+                onClick={() => onExecute(params, buildOptions())}
+                disabled={Boolean(valueError)}
+                className="terminal-btn terminal-btn-secondary mt-2 w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                忽略预演，仍然发送
+              </button>
+            </div>
+          )}
+
           {gasEstimate && (
             <div className="p-3 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)]" aria-live="polite">
               <div className="flex items-center gap-2 mb-2">
@@ -212,19 +404,53 @@ function MethodItem({
               <p className="text-[12px] text-[var(--terminal-red)]/80 font-mono break-all">{gasError}</p>
             </div>
           )}
+
+          {simulation && (
+            <div
+              className={`p-2.5 border ${
+                simulation.ok
+                  ? "border-[var(--terminal-green)]/30 bg-[var(--terminal-green)]/5"
+                  : "border-[var(--terminal-red)]/30 bg-[var(--terminal-red)]/5"
+              }`}
+              aria-live="polite"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <FlaskConical
+                  size={12}
+                  className={simulation.ok ? "text-[var(--terminal-green)]" : "text-[var(--terminal-red)]"}
+                  aria-hidden="true"
+                />
+                <span
+                  className={`text-[11px] font-medium ${
+                    simulation.ok ? "text-[var(--terminal-green)]" : "text-[var(--terminal-red)]"
+                  }`}
+                >
+                  {simulation.ok ? "预演通过" : "预演失败"}
+                </span>
+              </div>
+              <p className="break-all font-mono text-[11px] text-[var(--terminal-text-secondary)]">
+                {simulation.message}
+              </p>
+            </div>
+          )}
+
           {result && (
             <div className="p-3 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)]" aria-live="polite">
-              <div className="flex items-center justify-between mb-1">
+              <div className="mb-1 flex items-center justify-between gap-2">
                 <span className="text-[12px] font-medium text-[var(--terminal-text-secondary)]">Result</span>
-                <button
-                  onClick={() => { navigator.clipboard.writeText(result); toast.success("已复制"); }}
-                  className="p-1 border border-transparent hover:bg-[var(--terminal-hover)] hover:border-[var(--terminal-separator)] cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)]"
-                  aria-label="复制结果"
-                >
-                  <Copy size={12} className="text-[var(--terminal-text-secondary)]" aria-hidden="true" />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <ValueDecimalsControl />
+                  <button
+                    onClick={() => void copyResult()}
+                    className="p-1 border border-transparent hover:bg-[var(--terminal-hover)] hover:border-[var(--terminal-separator)] cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)]"
+                    aria-label={convertedResult !== null ? "复制转换后的值" : "复制原始值"}
+                    title={convertedResult !== null ? "复制转换后的值" : "复制原始值"}
+                  >
+                    <Copy size={12} className="text-[var(--terminal-text-secondary)]" aria-hidden="true" />
+                  </button>
+                </div>
               </div>
-              <p className="text-[13px] font-mono break-all text-[var(--terminal-text)]">{result}</p>
+              <ValueDisplay value={result} className="text-[13px] text-[var(--terminal-text)]" />
             </div>
           )}
         </div>
@@ -257,6 +483,10 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   );
   const readMethods = useMemo(() => methods.filter(isReadMethod), [methods]);
   const writeMethods = useMemo(() => methods.filter(isWriteMethod), [methods]);
+  const payableWriteCount = useMemo(
+    () => writeMethods.filter(isPayableMethod).length,
+    [writeMethods]
+  );
   const filterMethods = (items: ethers.FunctionFragment[]) => {
     const query = methodSearch.trim().toLowerCase();
     if (!query) return items;
@@ -266,19 +496,22 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     });
   };
 
-  const parseParams = (method: ethers.FunctionFragment, params: string[]) =>
-    params.map((p, i) => {
-      const param = method.inputs[i];
-      if (param.type.includes("[]")) return JSON.parse(p || "[]");
-      if (param.type.startsWith("uint") || param.type.startsWith("int")) return BigInt(p || "0");
-      if (param.type === "bool") return p.toLowerCase() === "true";
-      return p;
-    });
-
   const getProvider = () => {
     const ethereum = (window as { ethereum?: ethers.Eip1193Provider }).ethereum;
     if (!ethereum) throw new Error("未检测到钱包，请安装 MetaMask 等浏览器钱包");
     return new ethers.BrowserProvider(ethereum);
+  };
+
+  /**
+   * Reads and simulations should run as the connected account: many contracts
+   * branch on `msg.sender`, and a provider-only call would use the zero address.
+   */
+  const getReadRunner = async (provider: ethers.BrowserProvider) => {
+    try {
+      return await provider.getSigner();
+    } catch {
+      return provider;
+    }
   };
 
   const serializeBigInt = (value: unknown): unknown => {
@@ -337,8 +570,9 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     setLoading(prev => ({ ...prev, [key]: true }));
     try {
       const provider = getProvider();
-      const c = new ethers.Contract(contract.address, contract.abi, provider);
-      const parsedParams = parseParams(method, params);
+      const runner = await getReadRunner(provider);
+      const c = new ethers.Contract(contract.address, contract.abi, runner);
+      const parsedParams = parseMethodParams(method, params);
       const result = await c[method.format("sighash")](...parsedParams);
       const formattedResult = formatResult(result);
 
@@ -368,11 +602,19 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     }
   };
 
-  const estimateGas = async (method: ethers.FunctionFragment, params: string[]): Promise<GasEstimate> => {
+  const estimateGas = async (
+    method: ethers.FunctionFragment,
+    params: string[],
+    options: ExecuteOptions
+  ): Promise<GasEstimate> => {
     const provider = getProvider();
-    const c = new ethers.Contract(contract.address, contract.abi, provider);
-    const parsedParams = parseParams(method, params);
-    const estimatedGas = await c[method.format("sighash")].estimateGas(...parsedParams);
+    const runner = await getReadRunner(provider);
+    const c = new ethers.Contract(contract.address, contract.abi, runner);
+    const parsedParams = parseMethodParams(method, params);
+    const estimatedGas = await c[method.format("sighash")].estimateGas(
+      ...parsedParams,
+      buildOverrides(options)
+    );
     const feeData = await provider.getFeeData();
     const gasPrice = feeData.gasPrice ?? feeData.maxFeePerGas ?? BigInt(0);
     const totalCostWei = estimatedGas * gasPrice;
@@ -383,7 +625,36 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     };
   };
 
-  const executeWrite = async (method: ethers.FunctionFragment, params: string[]) => {
+  /** Run the write as an `eth_call` from the connected account, without sending. */
+  const simulateWrite = async (
+    method: ethers.FunctionFragment,
+    params: string[],
+    options: ExecuteOptions
+  ): Promise<SimulationResult> => {
+    try {
+      const provider = getProvider();
+      const signer = await provider.getSigner();
+      const from = await signer.getAddress();
+      const c = new ethers.Contract(contract.address, contract.abi, signer);
+      const parsedParams = parseMethodParams(method, params);
+      const result = await c[method.format("sighash")].staticCall(
+        ...parsedParams,
+        { ...buildOverrides(options), from }
+      );
+      if (result === null || result === undefined) {
+        return { ok: true, message: "调用成功（无返回值）" };
+      }
+      return { ok: true, message: formatResult(result) };
+    } catch (error) {
+      return { ok: false, message: getReadableContractError(error, contract.abi as any[]) };
+    }
+  };
+
+  const executeWrite = async (
+    method: ethers.FunctionFragment,
+    params: string[],
+    options: ExecuteOptions
+  ) => {
     const key = getMethodKey(method);
     setLoading(prev => ({ ...prev, [key]: true }));
     let historyId: number | null = null;
@@ -392,13 +663,17 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
       const provider = getProvider();
       const signer = await provider.getSigner();
       const c = new ethers.Contract(contract.address, contract.abi, signer);
-      const parsedParams = parseParams(method, params);
-      const tx = await c[method.format("sighash")](...parsedParams);
+      const parsedParams = parseMethodParams(method, params);
+      const tx = await c[method.format("sighash")](
+        ...parsedParams,
+        buildOverrides(options)
+      );
       txHash = tx.hash;
 
       historyId = await saveHistory({
         ...getHistoryBase(method, parsedParams),
         txHash,
+        value: options.valueWei,
         result: "⏳ Transaction sent, waiting for confirmation...",
       });
 
@@ -428,6 +703,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
           await saveHistory({
             ...getHistoryBase(method, params),
             txHash,
+            value: options.valueWei,
             error: message,
           });
         }
@@ -507,7 +783,8 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
                 }`}
                 onClick={() => setActiveTab("write")}
               >
-                [WRITE] ({writeMethods.length})
+                [WRITE] ({writeMethods.length}
+                {payableWriteCount > 0 ? ` · ${payableWriteCount} payable` : ""})
               </button>
             </div>
 
@@ -536,8 +813,21 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
                     key={getMethodKey(method)}
                     method={method}
                     isWrite={activeTab === "write"}
-                    onExecute={(params) => activeTab === "write" ? executeWrite(method, params) : executeRead(method, params)}
-                    onEstimateGas={activeTab === "write" ? (params) => estimateGas(method, params) : undefined}
+                    onExecute={(params, options) =>
+                      activeTab === "write"
+                        ? executeWrite(method, params, options)
+                        : executeRead(method, params)
+                    }
+                    onEstimateGas={
+                      activeTab === "write"
+                        ? (params, options) => estimateGas(method, params, options)
+                        : undefined
+                    }
+                    onSimulate={
+                      activeTab === "write"
+                        ? (params, options) => simulateWrite(method, params, options)
+                        : undefined
+                    }
                     loading={!!loading[getMethodKey(method)]}
                     result={results[getMethodKey(method)]}
                   />

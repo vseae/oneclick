@@ -23,6 +23,8 @@ export interface LocalHistoryRecord {
   result?: string;
   error?: string;
   txHash?: string;
+  /** Decimal wei string attached to a payable write. */
+  value?: string;
   timestamp: string;
   chainId: number;
 }
@@ -51,6 +53,8 @@ export interface AddHistoryInput {
   result?: string;
   error?: string;
   txHash?: string;
+  /** Decimal wei string attached to a payable write. */
+  value?: string;
   chainId: number;
   timestamp?: string;
 }
@@ -77,6 +81,8 @@ export interface LocalDataSnapshot {
     result?: string;
     error?: string;
     txHash?: string;
+    /** Decimal wei string attached to a payable write. */
+    value?: string;
     timestamp?: string;
     chainId: number;
   }>;

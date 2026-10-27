@@ -237,6 +237,13 @@ body {
   padding-left: 36px;
 }
 
+/* Dense inline controls (toolbars) where the default input is too tall. */
+.terminal-input-compact {
+  padding: 3px 6px;
+  font-size: 10px;
+  border-radius: 8px;
+}
+
 .terminal-segment {
   display: inline-flex;
   background: var(--terminal-fill);

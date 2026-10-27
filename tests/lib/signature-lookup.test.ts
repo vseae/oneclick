@@ -352,4 +352,45 @@ describe("signature lookup", () => {
     expect(listContractsByChainId).toHaveBeenCalledWith(1);
     expect(result.candidates.some((item) => item.source === "local")).toBe(true);
   });
+
+  it("looks up remote signatures without a chain or local ABI", async () => {
+    const listContractsByChainId = vi.fn(async () => []);
+    vi.doMock("../../lib/local-store", () => ({
+      listContractsByChainId,
+    }));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [{ text_signature: "Transfer(address,address,uint256)" }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          result: { function: {}, event: {} },
+        }),
+      });
+
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const mod = await import("../../lib/signature-lookup");
+    const result = await mod.lookupRemoteSignatureCandidates(
+      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    );
+
+    expect(result.normalized.kind).toBe("event");
+    expect(result.candidates).toEqual([
+      expect.objectContaining({
+        name: "Transfer(address,address,uint256)",
+        source: "4byte",
+        kind: "event",
+      }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(listContractsByChainId).not.toHaveBeenCalled();
+  });
 });

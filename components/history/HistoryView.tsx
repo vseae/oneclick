@@ -9,6 +9,9 @@ import { historyKeys, useHistory } from "@/lib/queries";
 import { useSpring, animated, useTrail } from "react-spring";
 import { Trash2, Clock } from "lucide-react";
 import { useHydrated } from "@/lib/use-hydrated";
+import ValueDisplay from "@/components/ValueDisplay";
+import { formatAmount } from "@/lib/convert";
+import ValueDecimalsControl from "@/components/ValueDecimalsControl";
 
 export default function HistoryView() {
   const { chainId } = useAccount();
@@ -77,14 +80,17 @@ export default function HistoryView() {
   return (
     <animated.div style={fadeIn} className="terminal-card bg-[var(--terminal-card)]">
       <div className="border-b border-[var(--terminal-separator)] p-4">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 gap-2">
           <h2 className="terminal-section-title">[SYSTEM_LOGS]</h2>
-          {history.length > 0 && (
-            <button onClick={clearHistory} className="terminal-btn terminal-btn-secondary text-[var(--terminal-red)]">
-              <Trash2 size={14} aria-hidden="true" />
-              <span>Clear</span>
-            </button>
-          )}
+          <div className="flex items-center gap-1.5">
+            <ValueDecimalsControl />
+            {history.length > 0 && (
+              <button onClick={clearHistory} className="terminal-btn terminal-btn-secondary text-[var(--terminal-red)]">
+                <Trash2 size={14} aria-hidden="true" />
+                <span>Clear</span>
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex gap-1 p-1 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)]">
@@ -150,8 +156,16 @@ export default function HistoryView() {
                   {item.params.length > 0 && (
                     <p className="text-[12px] text-[var(--terminal-text-secondary)] truncate">PARAMS: {JSON.stringify(item.params)}</p>
                   )}
+                  {item.value && (
+                    <p className="text-[12px] text-[var(--terminal-text-secondary)]">
+                      VALUE: {formatAmount(BigInt(item.value), 18)} ETH
+                      <span className="ml-1 font-mono opacity-60">({item.value} wei)</span>
+                    </p>
+                  )}
                   {item.result && (
-                    <p className="mt-1 text-[12px] text-[var(--terminal-green)] break-all">RESULT: {item.result}</p>
+                    <div className="mt-1 text-[12px] text-[var(--terminal-green)] break-all">
+                      RESULT: <ValueDisplay value={item.result} />
+                    </div>
                   )}
                   {item.error && (
                     <p className="mt-1 text-[12px] text-[var(--terminal-red)] break-all">ERROR: {item.error}</p>

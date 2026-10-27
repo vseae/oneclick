@@ -35,6 +35,7 @@ interface HistoryRow {
   result: string | null;
   error: string | null;
   txHash: string | null;
+  value: string | null;
   timestamp: string;
   chainId: number;
 }
@@ -69,6 +70,13 @@ function assertValidChainId(chainId: unknown, fieldName: string): asserts chainI
 
 function serializeJson(value: unknown): string {
   return JSON.stringify(value);
+}
+
+/** Payable values are stored as decimal wei strings; anything else is dropped. */
+function normalizeWeiValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return /^\d+$/.test(trimmed) ? trimmed : null;
 }
 
 function parseJson<T>(value: string): T {
@@ -110,6 +118,7 @@ function rowToHistory(row: HistoryRow): LocalHistoryRecord {
     result: row.result ?? undefined,
     error: row.error ?? undefined,
     txHash: row.txHash ?? undefined,
+    value: row.value ?? undefined,
     timestamp: row.timestamp,
     chainId: row.chainId,
   };
@@ -147,6 +156,7 @@ function initializeSchema(db: SqliteDatabase) {
       result TEXT,
       error TEXT,
       txHash TEXT,
+      value TEXT,
       timestamp TEXT NOT NULL,
       chainId INTEGER NOT NULL,
       FOREIGN KEY(contractId) REFERENCES contracts(id) ON DELETE CASCADE
@@ -161,6 +171,15 @@ function initializeSchema(db: SqliteDatabase) {
     CREATE INDEX IF NOT EXISTS idx_history_chain_id
       ON history(chainId);
   `);
+
+  // Databases created before payable values were tracked need the column added
+  // in place, otherwise existing local history would be lost on upgrade.
+  const historyColumns = db
+    .prepare("PRAGMA table_info(history)")
+    .all() as Array<{ name: string }>;
+  if (!historyColumns.some((column) => column.name === "value")) {
+    db.exec("ALTER TABLE history ADD COLUMN value TEXT");
+  }
 }
 
 function prepareSnapshot(snapshot: LocalDataSnapshot) {
@@ -264,6 +283,7 @@ function prepareSnapshot(snapshot: LocalDataSnapshot) {
         result: item.result,
         error: item.error,
         txHash: item.txHash,
+        value: item.value,
         timestamp: item.timestamp ?? new Date().toISOString(),
         chainId,
       },
@@ -398,8 +418,8 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     const result = db.prepare(
       `INSERT INTO history (
         contractId, contractName, contractAddress, methodName, methodType,
-        params, result, error, txHash, timestamp, chainId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        params, result, error, txHash, value, timestamp, chainId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       input.contractId,
       input.contractName,
@@ -410,6 +430,7 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
       input.result ?? null,
       input.error ?? null,
       input.txHash ?? null,
+      normalizeWeiValue(input.value),
       input.timestamp ?? new Date().toISOString(),
       input.chainId
     );
@@ -509,6 +530,7 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
         result: item.result,
         error: item.error,
         txHash: item.txHash,
+        value: item.value,
         timestamp: item.timestamp,
         chainId: item.chainId,
       })),
@@ -555,8 +577,8 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
         db.prepare(
           `INSERT INTO history (
             contractId, contractName, contractAddress, methodName, methodType,
-            params, result, error, txHash, timestamp, chainId
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            params, result, error, txHash, value, timestamp, chainId
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           mappedContractId,
           item.record.contractName,
@@ -567,6 +589,7 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
           item.record.result ?? null,
           item.record.error ?? null,
           item.record.txHash ?? null,
+          normalizeWeiValue(item.record.value),
           item.record.timestamp,
           item.record.chainId
         );

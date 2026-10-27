@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createSqliteStore } from "../../lib/server/sqlite-store";
@@ -307,6 +308,95 @@ describe("sqlite-store importLocalData", () => {
         contractName: "TokenA",
         methodName: "symbol",
       }),
+    ]);
+  });
+
+  it("stores the payable value attached to a write", () => {
+    const store = createTempStore();
+    const { id } = store.upsertContract({
+      name: "Vault",
+      address: TOKEN_A,
+      chainId: 1,
+      abi: [],
+    });
+
+    store.addHistory({
+      contractId: id,
+      contractName: "Vault",
+      contractAddress: TOKEN_A,
+      methodName: "deposit",
+      methodType: "write",
+      params: [],
+      value: "1500000000000000000",
+      chainId: 1,
+    });
+    store.addHistory({
+      contractId: id,
+      contractName: "Vault",
+      contractAddress: TOKEN_A,
+      methodName: "deposit",
+      methodType: "write",
+      params: [],
+      // Garbage values must never reach the column.
+      value: "not-a-number",
+      chainId: 1,
+    });
+
+    const history = store.listHistory();
+    expect(history.filter((item) => item.value)).toEqual([
+      expect.objectContaining({ methodName: "deposit", value: "1500000000000000000" }),
+    ]);
+
+    const exported = store.exportLocalData();
+    expect(exported.history.filter((item) => item.value)).toEqual([
+      expect.objectContaining({ value: "1500000000000000000" }),
+    ]);
+  });
+
+  it("adds the payable value column to a pre-existing database", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "contracts-sqlite-legacy-"));
+    tempDirs.push(dir);
+    const dbPath = path.join(dir, "app.sqlite");
+
+    const legacy = new Database(dbPath);
+    legacy.exec(`
+      CREATE TABLE history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        contractId INTEGER NOT NULL,
+        contractName TEXT NOT NULL,
+        contractAddress TEXT NOT NULL,
+        methodName TEXT NOT NULL,
+        methodType TEXT NOT NULL CHECK(methodType IN ('read', 'write')),
+        params TEXT NOT NULL,
+        result TEXT,
+        error TEXT,
+        txHash TEXT,
+        timestamp TEXT NOT NULL,
+        chainId INTEGER NOT NULL
+      );
+    `);
+    legacy.close();
+
+    const store = createSqliteStore(dbPath);
+    const { id } = store.upsertContract({
+      name: "Vault",
+      address: TOKEN_A,
+      chainId: 1,
+      abi: [],
+    });
+    store.addHistory({
+      contractId: id,
+      contractName: "Vault",
+      contractAddress: TOKEN_A,
+      methodName: "deposit",
+      methodType: "write",
+      params: [],
+      value: "42",
+      chainId: 1,
+    });
+
+    expect(store.listHistory()).toEqual([
+      expect.objectContaining({ contractId: id, value: "42" }),
     ]);
   });
 });

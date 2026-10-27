@@ -23,3 +23,15 @@ _Avoid_: Method ID (when the item is an event topic or custom error)
 **System Log**:
 The network-scoped history of read and write operations performed through interaction panels.
 _Avoid_: Main list, activity feed
+
+**Value**:
+The ETH amount attached to a payable write, entered in ETH and sent as wei.
+_Avoid_: Amount (when referring to the ETH attached to a transaction)
+
+**Simulation**:
+An `eth_call` executed as the connected account before a write is sent, shown in the interaction panel as 预演.
+_Avoid_: Dry run, test call
+
+**Batch Read**:
+Running several read-only calls at once — either multiple methods on one contract or one method across several contracts.
+_Avoid_: Multicall (when naming the feature; Multicall3 is the on-chain contract)

@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowLeftRight,
   Binary,
+  Braces,
   ChevronRight,
   Clock,
   Code,
@@ -12,6 +13,7 @@ import {
   FileCode,
   Fingerprint,
   Hash,
+  Layers,
   Radio,
   Type,
 } from "lucide-react";
@@ -25,6 +27,8 @@ import AbiSelectorTool from "@/components/AbiSelectorTool";
 import TxDecoderTool from "@/components/TxDecoderTool";
 import EventLogTool from "@/components/EventLogTool";
 import SignatureLookupTool from "@/components/SignatureLookupTool";
+import EncoderTool from "@/components/EncoderTool";
+import BatchReadTool from "@/components/BatchReadTool";
 
 const converters = [
   {
@@ -66,6 +70,20 @@ const converters = [
 
 const directTools = [
   {
+    value: "encoder",
+    label: "编码器",
+    description: "Calldata / 构造参数",
+    icon: Braces,
+    component: EncoderTool,
+  },
+  {
+    value: "batch",
+    label: "批量读取",
+    description: "Multicall3 聚合读取",
+    icon: Layers,
+    component: BatchReadTool,
+  },
+  {
     value: "keccak",
     label: "Keccak256",
     description: "文本哈希与选择器",
@@ -89,7 +107,7 @@ const directTools = [
   {
     value: "events",
     label: "事件日志",
-    description: "解码事件日志",
+    description: "回执 / 原始日志解码",
     icon: Radio,
     component: EventLogTool,
   },

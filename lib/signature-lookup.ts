@@ -230,20 +230,19 @@ async function lookupFromSourcify(ctx: SourceContext): Promise<SignatureCandidat
   return deduplicateCandidates(candidates);
 }
 
-export async function lookupSignatureCandidates(input: string, chainId: number): Promise<SignatureLookupResult> {
-  const normalized = normalizeSignatureInput(input);
-  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
-    throw new Error("当前钱包网络无效，无法查询本地 ABI");
-  }
-  const ctx: SourceContext = { normalized, chainId };
+const LOOKUPS: Record<SignatureSource, (ctx: SourceContext) => Promise<SignatureCandidate[]>> = {
+  local: lookupFromLocal,
+  "4byte": lookupFrom4byte,
+  sourcify: lookupFromSourcify,
+};
 
-  const settled = await Promise.allSettled([
-    lookupFromLocal(ctx),
-    lookupFrom4byte(ctx),
-    lookupFromSourcify(ctx),
-  ]);
+async function runLookups(
+  normalized: NormalizedSignature,
+  ctx: SourceContext,
+  sources: SignatureSource[]
+): Promise<SignatureLookupResult> {
+  const settled = await Promise.allSettled(sources.map((source) => LOOKUPS[source](ctx)));
 
-  const sources: SignatureSource[] = ["local", "4byte", "sourcify"];
   const candidates: SignatureCandidate[] = [];
   const errors: SignatureLookupError[] = [];
 
@@ -263,4 +262,25 @@ export async function lookupSignatureCandidates(input: string, chainId: number):
     candidates: deduplicateCandidates(candidates),
     errors,
   };
+}
+
+export async function lookupSignatureCandidates(input: string, chainId: number): Promise<SignatureLookupResult> {
+  const normalized = normalizeSignatureInput(input);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new Error("当前钱包网络无效，无法查询本地 ABI");
+  }
+  const ctx: SourceContext = { normalized, chainId };
+
+  return runLookups(normalized, ctx, ["local", "4byte", "sourcify"]);
+}
+
+/**
+ * Remote-only lookup, used when no wallet network is available. Local ABIs are
+ * skipped because they are chain-scoped.
+ */
+export async function lookupRemoteSignatureCandidates(input: string): Promise<SignatureLookupResult> {
+  const normalized = normalizeSignatureInput(input);
+  const ctx: SourceContext = { normalized, chainId: 0 };
+
+  return runLookups(normalized, ctx, ["4byte", "sourcify"]);
 }
