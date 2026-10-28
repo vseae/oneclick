@@ -16,6 +16,7 @@ import {
   Fuel,
   Search,
   FlaskConical,
+  ScrollText,
 } from "lucide-react";
 import {
   formatResult,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/contract-utils";
 import { parseAmount } from "@/lib/convert";
 import { formatValueForDecimals, useValueDecimals } from "@/lib/value-decimals";
+import { useReducedMotion } from "@/lib/use-reduced-motion";
 import { addHistory, updateHistory as updateLocalHistory } from "@/lib/local-store";
 import type { ContractRecord } from "@/lib/types";
 import ValueDisplay from "@/components/ValueDisplay";
@@ -105,6 +107,7 @@ function MethodItem({
   const [simulating, setSimulating] = useState(false);
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const decimals = useValueDecimals();
+  const reducedMotion = useReducedMotion();
   const convertedResult = result ? formatValueForDecimals(result, decimals) : null;
 
   const payable = isPayableMethod(method);
@@ -197,6 +200,7 @@ function MethodItem({
     maxHeight: expanded ? 900 : 0,
     opacity: expanded ? 1 : 0,
     config: { tension: 280, friction: 24 },
+    immediate: reducedMotion,
   });
 
   return (
@@ -719,7 +723,8 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   };
 
   const currentMethods = filterMethods(activeTab === "read" ? readMethods : writeMethods);
-  const fadeIn = useSpring({ from: { opacity: 0, transform: "translateY(8px)" }, to: { opacity: 1, transform: "translateY(0)" }, config: { tension: 280, friction: 24 } });
+  const reducedMotion = useReducedMotion();
+  const fadeIn = useSpring({ from: { opacity: 0, transform: "translateY(8px)" }, to: { opacity: 1, transform: "translateY(0)" }, config: { tension: 280, friction: 24 }, immediate: reducedMotion });
 
   return (
     <animated.div style={fadeIn} className="terminal-card bg-[var(--terminal-card)]">
@@ -736,15 +741,26 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
               <p className="text-[13px] font-mono text-[var(--terminal-text-secondary)] truncate">{contract.address}</p>
             </div>
           </div>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="w-8 h-8 border border-transparent hover:bg-[var(--terminal-red)]/10 hover:border-[var(--terminal-separator)] flex items-center justify-center transition-colors cursor-pointer shrink-0 focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)]"
-              aria-label={`关闭 ${contract.name}`}
+          <div className="flex shrink-0 items-center gap-1">
+            <a
+              href="#system-logs"
+              className="terminal-btn terminal-btn-secondary h-8 px-2 text-[11px]"
+              aria-label="查看系统日志"
+              title="查看系统日志"
             >
-              <X size={16} className="text-[var(--terminal-red)]" />
-            </button>
-          )}
+              <ScrollText size={13} aria-hidden="true" />
+              <span className="hidden sm:inline">日志</span>
+            </a>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="w-8 h-8 border border-transparent hover:bg-[var(--terminal-red)]/10 hover:border-[var(--terminal-separator)] flex items-center justify-center transition-colors cursor-pointer shrink-0 focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)]"
+                aria-label={`关闭 ${contract.name}`}
+              >
+                <X size={16} className="text-[var(--terminal-red)]" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -764,11 +780,13 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
           </div>
         ) : (
           <>
-            <div className="flex gap-1 p-1 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)] mb-4" role="tablist" aria-label="方法类型">
+            <div className="mb-4 inline-flex gap-1 border border-[var(--terminal-separator)] bg-[var(--terminal-fill)] p-1" role="tablist" aria-label="方法类型">
               <button
+                id="methods-tab-read"
                 role="tab"
                 aria-selected={activeTab === "read"}
-                className={`flex-1 py-2 text-[12px] font-medium tracking-[0.01em] border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] ${
+                aria-controls="methods-panel"
+                className={`px-3 py-1.5 text-[12px] font-medium tracking-[0.01em] border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] ${
                   activeTab === "read" ? "bg-[var(--terminal-card)] border-[var(--terminal-blue)] text-[var(--terminal-blue)]" : "border-transparent text-[var(--terminal-text-secondary)]"
                 }`}
                 onClick={() => setActiveTab("read")}
@@ -776,9 +794,11 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
                 [READ] ({readMethods.length})
               </button>
               <button
+                id="methods-tab-write"
                 role="tab"
                 aria-selected={activeTab === "write"}
-                className={`flex-1 py-2 text-[12px] font-medium tracking-[0.01em] border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] ${
+                aria-controls="methods-panel"
+                className={`px-3 py-1.5 text-[12px] font-medium tracking-[0.01em] border transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] ${
                   activeTab === "write" ? "bg-[var(--terminal-card)] border-[var(--terminal-blue)] text-[var(--terminal-blue)]" : "border-transparent text-[var(--terminal-text-secondary)]"
                 }`}
                 onClick={() => setActiveTab("write")}
@@ -802,7 +822,12 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
               />
             </div>
 
-            <div className="space-y-2 max-h-[500px] overflow-y-auto" role="tabpanel">
+            <div
+              id="methods-panel"
+              role="tabpanel"
+              aria-labelledby={activeTab === "read" ? "methods-tab-read" : "methods-tab-write"}
+              className="terminal-scroll max-h-[500px] space-y-2 overflow-y-auto"
+            >
               {currentMethods.length === 0 ? (
                 <p className="text-center py-12 text-[14px] text-[var(--terminal-text-secondary)]">
                   无{activeTab === "read" ? "读" : "写"}方法

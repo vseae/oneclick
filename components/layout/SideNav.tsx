@@ -77,6 +77,7 @@ export default function SideNav({
   const [deleting, setDeleting] = useState(false);
 
   const menuTriggerRef = useRef<HTMLElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const longPressTimer = useRef<number | null>(null);
   const suppressNextClick = useRef(false);
 
@@ -90,6 +91,30 @@ export default function SideNav({
     return () => {
       window.removeEventListener("click", close);
       window.removeEventListener("scroll", close, true);
+    };
+  }, []);
+
+  /** Cmd/Ctrl+K and the header search button both focus the contract search. */
+  useEffect(() => {
+    const focusSearch = () => {
+      const input = searchInputRef.current;
+      if (!input) return;
+      if (window.matchMedia("(max-width: 767px)").matches) {
+        input.scrollIntoView({ block: "center" });
+      }
+      input.focus({ preventScroll: true });
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        focusSearch();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("oneclick:focus-search", focusSearch);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("oneclick:focus-search", focusSearch);
     };
   }, []);
 
@@ -237,8 +262,7 @@ export default function SideNav({
           </div>
         </div>
 
-        <div className="mb-2 flex items-center justify-between gap-1">
-          <span className="whitespace-nowrap text-[12px] font-medium">合约管理</span>
+        <div className="mb-2 flex items-center justify-end gap-1">
           <div className="flex items-center gap-0.5">
             <button
               type="button"
@@ -285,6 +309,7 @@ export default function SideNav({
             aria-hidden="true"
           />
           <input
+            ref={searchInputRef}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             className="terminal-input terminal-input-search h-8 pr-2 text-[12px]"
@@ -346,10 +371,10 @@ export default function SideNav({
                       aria-hidden="true"
                     />
                   </div>
-                  <p className="font-mono text-[10px] text-[var(--terminal-text-secondary)]">
+                  <p className="font-mono text-[11px] text-[var(--terminal-text-secondary)]">
                     {shortAddress(contract.address)}
                   </p>
-                  <p className="mt-0.5 text-[9px] text-[var(--terminal-text-secondary)]">
+                  <p className="mt-0.5 text-[10px] text-[var(--terminal-text-secondary)]">
                     ABI: {Array.isArray(contract.abi) ? contract.abi.length : 0}
                   </p>
                 </button>

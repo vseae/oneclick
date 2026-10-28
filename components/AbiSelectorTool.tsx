@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { useSpring, animated, useTrail } from "react-spring";
 import { Copy, FileCode, Search } from "lucide-react";
+import ToolHeader from "@/components/tools/ToolHeader";
 import { parseAbiSelectors, SelectorItem, SelectorType } from "@/lib/contract-utils";
 
 const typeConfig: Record<SelectorType, { label: string; color: string; bgColor: string }> = {
@@ -109,15 +110,11 @@ export default function AbiSelectorTool() {
 
   return (
     <animated.div style={fadeIn} className="terminal-card">
-      <div className="terminal-panel-header flex items-center justify-between gap-3">
-        <div>
-          <h2 className="terminal-section-title">[ABI_SELECTOR_TOOL]</h2>
-          <p className="text-[12px] text-[var(--terminal-text-secondary)] mt-1">
-            Parse ABI and generate function/event/error selectors
-          </p>
-        </div>
-        <span className="terminal-chip">PARSER</span>
-      </div>
+      <ToolHeader
+        title="ABI_SELECTOR_TOOL"
+        subtitle="解析 ABI 并生成函数 / 事件 / Error selector"
+        chip="PARSER"
+      />
 
       <div className="terminal-panel-body space-y-4">
         {!parsed ? (

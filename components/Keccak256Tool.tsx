@@ -5,6 +5,7 @@ import { ethers } from "ethers";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
 import { Hash, Copy } from "lucide-react";
+import ToolHeader from "@/components/tools/ToolHeader";
 
 export default function Keccak256Tool() {
   const [input, setInput] = useState("");
@@ -39,13 +40,11 @@ export default function Keccak256Tool() {
 
   return (
     <animated.div style={fadeIn} className="terminal-card">
-      <div className="terminal-panel-header flex items-center justify-between gap-3">
-        <div>
-          <h2 className="terminal-section-title">[KECCAK256_TOOL]</h2>
-          <p className="text-[12px] text-[var(--terminal-text-secondary)] mt-1">Compute hash and selector from UTF-8 text</p>
-        </div>
-        <span className="terminal-chip">HASHING</span>
-      </div>
+      <ToolHeader
+        title="KECCAK256_TOOL"
+        subtitle="计算 UTF-8 文本的 Keccak256 与 selector"
+        chip="HASHING"
+      />
 
       <div className="terminal-panel-body space-y-4">
         <div className="border border-[var(--terminal-separator)] bg-[var(--terminal-fill)] p-3 space-y-3">

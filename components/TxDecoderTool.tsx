@@ -6,6 +6,7 @@ import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
 import { FileSearch, Database, ClipboardPaste, ArrowRightLeft, ScrollText } from "lucide-react";
+import ToolHeader from "@/components/tools/ToolHeader";
 import { formatResult } from "@/lib/contract-utils";
 import { listContractsByChainId } from "@/lib/local-store";
 
@@ -327,15 +328,11 @@ export default function TxDecoderTool() {
 
   return (
     <animated.div style={fadeIn} className="terminal-card">
-      <div className="terminal-panel-header flex items-center justify-between gap-3">
-        <div>
-          <h2 className="terminal-section-title">[TX_DECODER_TOOL]</h2>
-          <p className="text-[12px] text-[var(--terminal-text-secondary)] mt-1">
-            Decode calldata or transaction hash with selected ABI
-          </p>
-        </div>
-        <span className="terminal-chip">DECODE</span>
-      </div>
+      <ToolHeader
+        title="TX_DECODER_TOOL"
+        subtitle="使用所选 ABI 解码 calldata 或交易哈希"
+        chip="DECODE"
+      />
 
       <div className="terminal-panel-body space-y-4">
         <div className="border border-[var(--terminal-separator)]">

@@ -1,12 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
-  ArrowLeft,
   ArrowLeftRight,
   Binary,
   Braces,
-  ChevronRight,
   Clock,
   Code,
   Coins,
@@ -17,6 +15,7 @@ import {
   Radio,
   Type,
 } from "lucide-react";
+import { ToolChromeContext } from "@/components/tools/tool-chrome";
 import UnitConverter from "@/components/UnitConverter";
 import TokenUnitConverter from "@/components/TokenUnitConverter";
 import BaseConversionTool from "@/components/BaseConversionTool";
@@ -131,32 +130,98 @@ type ToolValue = (typeof allTools)[number]["value"];
 
 export default function ToolPanel() {
   const [activeTool, setActiveTool] = useState<ToolValue | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const activeRef = useRef<HTMLDivElement | null>(null);
+  const pendingFocus = useRef<ToolValue | null>(null);
+  const toolButtons = useRef<Partial<Record<ToolValue, HTMLButtonElement | null>>>({});
+
   const active = allTools.find((tool) => tool.value === activeTool);
   const ActiveComponent = active?.component;
 
+  /** Return to the list and restore focus to the tool that was just closed. */
+  const handleBack = () => {
+    if (activeTool) {
+      pendingFocus.current = activeTool;
+    }
+    setExpanded(false);
+    setActiveTool(null);
+  };
+
+  const openTool = (value: ToolValue) => {
+    pendingFocus.current = null;
+    setExpanded(false);
+    setActiveTool(value);
+  };
+
+  /**
+   * Opening a tool resets the internal panel scroll and moves focus into the
+   * tool region. Going back restores focus to the originating tool button.
+   */
+  useEffect(() => {
+    if (activeTool) {
+      const scroller = activeRef.current?.closest<HTMLElement>(".terminal-main-tools");
+      if (window.matchMedia("(min-width: 1280px)").matches) {
+        scroller?.scrollTo({ top: 0 });
+      } else {
+        activeRef.current?.scrollIntoView({ block: "start" });
+      }
+      const backButton = activeRef.current?.querySelector<HTMLButtonElement>(
+        'button[aria-label="返回全部工具"]'
+      );
+      (backButton ?? activeRef.current)?.focus({ preventScroll: true });
+      return;
+    }
+
+    const value = pendingFocus.current;
+    if (value) {
+      pendingFocus.current = null;
+      toolButtons.current[value]?.focus();
+    }
+  }, [activeTool]);
+
+  /** Expanded mode gives the same mounted tool the full main-column width. */
+  useEffect(() => {
+    const grid = activeRef.current?.closest(".terminal-main-grid");
+    if (!grid) return;
+    grid.classList.toggle("terminal-grid-expanded", expanded);
+    return () => grid.classList.remove("terminal-grid-expanded");
+  }, [expanded, activeTool]);
+
+  useEffect(() => {
+    if (expanded) {
+      activeRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [expanded]);
+
   if (active && ActiveComponent) {
     return (
-      <div className="space-y-2">
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border border-[var(--terminal-separator)] bg-[var(--terminal-fill)] p-2">
-          <button
-            type="button"
-            onClick={() => setActiveTool(null)}
-            className="terminal-btn terminal-btn-secondary h-8 px-2.5"
-          >
-            <ArrowLeft size={13} aria-hidden="true" />
-            <span>全部工具</span>
-          </button>
-          <span className="min-w-0 truncate text-[11px] uppercase tracking-[0.06em] text-[var(--terminal-text-secondary)]">
-            {active.label}
-          </span>
+      <ToolChromeContext.Provider
+        value={{
+          onBack: handleBack,
+          onExpand: () => setExpanded((current) => !current),
+          expanded,
+        }}
+      >
+        <div
+          ref={activeRef}
+          id="toolkit"
+          role="region"
+          aria-label={active.label}
+          tabIndex={-1}
+          className={
+            expanded
+              ? "mx-auto w-full max-w-5xl scroll-mt-20 outline-none"
+              : "scroll-mt-20 outline-none"
+          }
+        >
+          <ActiveComponent />
         </div>
-        <ActiveComponent />
-      </div>
+      </ToolChromeContext.Provider>
     );
   }
 
   return (
-    <section className="terminal-card" aria-label="工具面板">
+    <section id="toolkit" className="terminal-card scroll-mt-20" aria-label="工具面板">
       <div className="terminal-panel-header flex items-start justify-between gap-3">
         <div>
           <h2 className="terminal-section-title">[TOOLKIT]</h2>
@@ -174,45 +239,44 @@ export default function ToolPanel() {
               <h3 className="text-[11px] font-bold uppercase tracking-[0.08em] text-[var(--terminal-text-secondary)]">
                 {group.label}
               </h3>
-              <span className="text-[10px] text-[var(--terminal-text-secondary)]">{group.hint}</span>
+              <span className="text-[11px] text-[var(--terminal-text-secondary)]">{group.hint}</span>
             </div>
 
-            <div className="divide-y divide-[var(--terminal-separator)] overflow-hidden border border-[var(--terminal-separator)]">
-              {group.tools.map((tool) => {
+            <div className="grid grid-cols-2 gap-1.5 md:grid-cols-3 xl:grid-cols-2">
+              {group.tools.map((tool, index) => {
                 const Icon = tool.icon;
+                const isLastOdd =
+                  group.tools.length % 2 === 1 && index === group.tools.length - 1;
                 return (
                   <button
                     key={tool.value}
+                    ref={(node) => {
+                      toolButtons.current[tool.value] = node;
+                    }}
                     type="button"
-                    onClick={() => setActiveTool(tool.value)}
-                    className="group flex w-full items-center gap-2.5 bg-[var(--terminal-card)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--terminal-hover)] focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)]"
+                    onClick={() => openTool(tool.value)}
+                    title={`${tool.label} — ${tool.description}`}
+                    className={`group flex min-h-[46px] items-start gap-2 border border-[var(--terminal-separator)] bg-[var(--terminal-card)] p-2 text-left transition-colors hover:border-[var(--terminal-blue)]/50 hover:bg-[var(--terminal-hover)] focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-[var(--terminal-blue)] sm:min-h-[58px] ${
+                      isLastOdd ? "col-span-2 md:col-span-1 xl:col-span-2" : ""
+                    }`}
                   >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center border border-[var(--terminal-separator)] bg-[var(--terminal-fill)] text-[var(--terminal-blue)]">
-                      <Icon size={14} aria-hidden="true" />
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[var(--terminal-separator)] bg-[var(--terminal-fill)] text-[var(--terminal-blue)]">
+                      <Icon size={13} aria-hidden="true" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[12px] font-medium text-[var(--terminal-text)]">
                         {tool.label}
                       </span>
-                      <span className="block truncate text-[10px] text-[var(--terminal-text-secondary)]">
+                      <span className="mt-0.5 hidden line-clamp-2 text-[11px] leading-snug text-[var(--terminal-text-secondary)] sm:block">
                         {tool.description}
                       </span>
                     </span>
-                    <ChevronRight
-                      size={13}
-                      className="shrink-0 text-[var(--terminal-text-secondary)] transition-transform group-hover:translate-x-0.5"
-                      aria-hidden="true"
-                    />
                   </button>
                 );
               })}
             </div>
           </div>
         ))}
-
-        <p className="text-[10px] leading-relaxed text-[var(--terminal-text-secondary)]">
-          工具会在右侧面板内打开；合约交互和系统日志保留在中间区域。
-        </p>
       </div>
     </section>
   );

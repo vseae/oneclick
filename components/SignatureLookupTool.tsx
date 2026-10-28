@@ -5,6 +5,7 @@ import { useAccount } from "wagmi";
 import { Search, Database, Globe, AlertTriangle, Copy } from "lucide-react";
 import { useSpring, animated } from "react-spring";
 import { toast } from "sonner";
+import ToolHeader from "@/components/tools/ToolHeader";
 import {
   lookupSignatureCandidates,
   type SignatureCandidate,
@@ -147,15 +148,11 @@ export default function SignatureLookupTool() {
 
   return (
     <animated.div style={fadeIn} className="terminal-card">
-      <div className="terminal-panel-header flex items-center justify-between gap-3">
-        <div>
-          <h2 className="terminal-section-title">[SIGNATURE_LOOKUP]</h2>
-          <p className="mt-1 text-[12px] text-[var(--terminal-text-secondary)]">
-            根据 4 字节选择器或 32 字节 Topic 反查函数/事件签名
-          </p>
-        </div>
-        <span className="terminal-chip">4BYTE / TOPIC</span>
-      </div>
+      <ToolHeader
+        title="SIGNATURE_LOOKUP"
+        subtitle="根据 4 字节选择器或 32 字节 Topic 反查函数/事件签名"
+        chip="4BYTE / TOPIC"
+      />
 
       <div className="terminal-panel-body space-y-4">
         <div className="space-y-3 border border-[var(--terminal-separator)] bg-[var(--terminal-fill)] p-3">

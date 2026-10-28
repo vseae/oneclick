@@ -30,7 +30,7 @@
   --terminal-fill: #f8fbff;
   --terminal-fill-strong: #eff5ff;
   --terminal-text: #142033;
-  --terminal-text-secondary: #64758b;
+  --terminal-text-secondary: #5b6b80;
   --terminal-blue: #2563eb;
   --terminal-green: #0f766e;
   --terminal-orange: #b45309;
@@ -380,6 +380,13 @@ body {
   flex: 0 0 auto;
 }
 
+/* Icon-only variant; size stays under the caller's h-8 / w-8 utilities. */
+.terminal-btn-icon {
+  padding: 0;
+  gap: 0;
+  flex: 0 0 auto;
+}
+
 .menu-item {
   display: flex;
   width: 100%;
@@ -452,7 +459,7 @@ body {
 
 @media (min-width: 1280px) {
   .terminal-main-grid {
-    grid-template-columns: minmax(0, 2fr) minmax(380px, 1fr);
+    grid-template-columns: minmax(0, 2fr) minmax(400px, 1fr);
     grid-template-areas:
       "contract tools"
       "logs tools";
@@ -464,6 +471,70 @@ body {
     max-height: calc(100vh - 88px);
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+}
+
+@media (min-width: 1536px) {
+  .terminal-main-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(440px, 1fr);
+  }
+}
+
+/* Expanded tool mode reuses the mounted tool and takes over the main grid. */
+.terminal-grid-expanded .terminal-main-contract,
+.terminal-grid-expanded .terminal-main-logs {
+  display: none;
+}
+
+.terminal-grid-expanded .terminal-main-tools {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  position: static;
+  max-height: none;
+  overflow: visible;
+}
+
+/* Thin, low-contrast scrollbars keep nested panels from feeling heavy. */
+.terminal-scroll,
+.terminal-main-tools {
+  scrollbar-width: thin;
+  scrollbar-color: var(--terminal-outline) transparent;
+}
+
+.terminal-scroll::-webkit-scrollbar,
+.terminal-main-tools::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.terminal-scroll::-webkit-scrollbar-track,
+.terminal-main-tools::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.terminal-scroll::-webkit-scrollbar-thumb,
+.terminal-main-tools::-webkit-scrollbar-thumb {
+  background: var(--terminal-separator);
+}
+
+.terminal-scroll::-webkit-scrollbar-thumb:hover,
+.terminal-main-tools::-webkit-scrollbar-thumb:hover {
+  background: var(--terminal-outline);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .terminal-card {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }
 

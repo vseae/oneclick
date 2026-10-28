@@ -9,6 +9,7 @@ import { historyKeys, useHistory } from "@/lib/queries";
 import { useSpring, animated, useTrail } from "react-spring";
 import { Trash2, Clock } from "lucide-react";
 import { useHydrated } from "@/lib/use-hydrated";
+import { useReducedMotion } from "@/lib/use-reduced-motion";
 import ValueDisplay from "@/components/ValueDisplay";
 import { formatAmount } from "@/lib/convert";
 import ValueDecimalsControl from "@/components/ValueDecimalsControl";
@@ -17,6 +18,7 @@ export default function HistoryView() {
   const { chainId } = useAccount();
   const queryClient = useQueryClient();
   const hydrated = useHydrated();
+  const reducedMotion = useReducedMotion();
   const { data: history = [], isPending, error } = useHistory(chainId);
   const [methodFilter, setMethodFilter] = useState<"all" | "read" | "write">("all");
 
@@ -50,12 +52,14 @@ export default function HistoryView() {
     from: { opacity: 0, transform: "translateY(8px)" },
     to: { opacity: 1, transform: "translateY(0px)" },
     config: { tension: 280, friction: 24 },
+    immediate: reducedMotion,
   });
 
   const fadeIn = useSpring({
     from: { opacity: 0 },
     to: { opacity: 1 },
     config: { duration: 300 },
+    immediate: reducedMotion,
   });
 
   const formatTime = (timestamp: string) => {
@@ -69,7 +73,13 @@ export default function HistoryView() {
 
   if (isPending) {
     return (
-      <div className="terminal-card p-16 flex items-center justify-center" aria-live="polite">
+      <div
+        id="system-logs"
+        role="region"
+        aria-label="系统日志"
+        className="terminal-card scroll-mt-20 p-16 flex items-center justify-center"
+        aria-live="polite"
+      >
         <div className="w-6 h-6 border-2 border-[var(--terminal-blue)] border-t-transparent rounded-full animate-spin" role="status">
           <span className="sr-only">加载中…</span>
         </div>
@@ -78,25 +88,36 @@ export default function HistoryView() {
   }
 
   return (
-    <animated.div style={fadeIn} className="terminal-card bg-[var(--terminal-card)]">
+    <animated.div
+      id="system-logs"
+      role="region"
+      aria-label="系统日志"
+      style={fadeIn}
+      className="terminal-card scroll-mt-20 bg-[var(--terminal-card)]"
+    >
       <div className="border-b border-[var(--terminal-separator)] p-4">
-        <div className="flex items-center justify-between mb-4 gap-2">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h2 className="terminal-section-title">[SYSTEM_LOGS]</h2>
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
             <ValueDecimalsControl />
             {history.length > 0 && (
               <button onClick={clearHistory} className="terminal-btn terminal-btn-secondary text-[var(--terminal-red)]">
                 <Trash2 size={14} aria-hidden="true" />
-                <span>Clear</span>
+                <span>清空</span>
               </button>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1 p-1 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            role="group"
+            aria-label="日志筛选"
+            className="flex gap-1 p-1 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)]"
+          >
             {(["all", "read", "write"] as const).map((type) => (
               <button
                 key={type}
+                aria-pressed={methodFilter === type}
                 onClick={() => setMethodFilter(type)}
                 className={`px-3 py-1.5 text-[11px] font-medium tracking-[0.01em] transition-colors cursor-pointer border ${
                   methodFilter === type
@@ -108,13 +129,19 @@ export default function HistoryView() {
               </button>
             ))}
           </div>
-          <div className="terminal-input text-[13px] flex-1 text-[var(--terminal-text-secondary)]">
+          <span className="terminal-chip ml-auto">
             {hydrated && chainId ? `Chain ${chainId}` : "未连接"}
-          </div>
+          </span>
         </div>
       </div>
 
-      <div className="p-1">
+      <div
+        className={
+          history.length > 0
+            ? "terminal-scroll max-h-[460px] overflow-y-auto p-1"
+            : "p-1"
+        }
+      >
         {history.length === 0 ? (
           <div className="text-center py-16">
             <div className="w-12 h-12 border border-[var(--terminal-separator)] bg-[var(--terminal-fill)] flex items-center justify-center mx-auto mb-3" aria-hidden="true">
