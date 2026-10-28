@@ -29,6 +29,7 @@ import {
 import { parseAmount } from "@/lib/convert";
 import { formatValueForDecimals, useValueDecimals } from "@/lib/value-decimals";
 import { useReducedMotion } from "@/lib/use-reduced-motion";
+import { useEthersProvider } from "@/lib/use-ethers-provider";
 import { addHistory, updateHistory as updateLocalHistory } from "@/lib/local-store";
 import type { ContractRecord } from "@/lib/types";
 import ValueDisplay from "@/components/ValueDisplay";
@@ -465,6 +466,7 @@ function MethodItem({
 
 export default function ContractInteractView({ contract, onClose, onHistoryUpdate }: ContractInteractViewProps) {
   const { chainId } = useAccount();
+  const provider = useEthersProvider();
   const [activeTab, setActiveTab] = useState<"read" | "write">("read");
   const [results, setResults] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
@@ -501,9 +503,8 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   };
 
   const getProvider = () => {
-    const ethereum = (window as { ethereum?: ethers.Eip1193Provider }).ethereum;
-    if (!ethereum) throw new Error("未检测到钱包，请安装 MetaMask 等浏览器钱包");
-    return new ethers.BrowserProvider(ethereum);
+    if (!provider) throw new Error("请先连接钱包");
+    return provider;
   };
 
   /**

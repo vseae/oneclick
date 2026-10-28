@@ -8,6 +8,13 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1", "localhost", "*.localhost"],
   turbopack: {
     root: path.resolve(__dirname),
+    resolveAlias: {
+      // WalletConnect (pulled in by RainbowKit) depends on pino@7, whose
+      // thread-stream transport drags its own test files — and their dev-only
+      // deps (`tape`, `tap`, `fastbench`, `desm`) — into the bundle graph.
+      // pino's browser entry never touches thread-stream, so resolve to it.
+      pino: "pino/browser.js",
+    },
   },
   webpack: (config) => {
     config.externals.push('pino-pretty', 'encoding');

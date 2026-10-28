@@ -1,4 +1,5 @@
-import { createConfig, http, injected } from "wagmi";
+import { getDefaultConfig } from "@rainbow-me/rainbowkit";
+import { http } from "wagmi";
 import {
   mainnet,
   sepolia,
@@ -12,7 +13,7 @@ import {
 } from "wagmi/chains";
 import { exsatTestnet } from "@/lib/chains";
 
-const chains = [
+export const chains = [
   mainnet,
   sepolia,
   sonic,
@@ -25,9 +26,18 @@ const chains = [
   monadTestnet,
 ] as const;
 
-export const config = createConfig({
+/**
+ * WalletConnect Cloud project ID. Required by RainbowKit's default wallet set —
+ * without it the WalletConnect-based wallets fail to connect, so the value is
+ * inlined at build time from the environment rather than defaulted silently.
+ */
+const projectId = process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID ?? "";
+
+export const config = getDefaultConfig({
+  appName: "OneClick",
+  appDescription: "Interact with EVM smart contracts easily",
+  projectId,
   chains,
-  connectors: [injected()],
   // Keep the server and the first client render on the same wallet state.
   // Wagmi reconnects persisted wallet state after hydration.
   ssr: true,

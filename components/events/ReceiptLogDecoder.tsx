@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { formatEventArgument, formatEventParamType } from "@/lib/event-log";
 import { listContractsByChainId } from "@/lib/local-store";
+import { useEthersProvider } from "@/lib/use-ethers-provider";
 import { copyToClipboard, shortenHash, SummaryRow } from "./log-shared";
 
 interface SavedContract {
@@ -172,6 +173,7 @@ function LogItem({ log }: { log: ParsedLog }) {
 
 export default function ReceiptLogDecoder() {
   const { chainId } = useAccount();
+  const provider = useEthersProvider();
   const [mode, setMode] = useState<"saved" | "manual">("saved");
   const [contracts, setContracts] = useState<SavedContract[]>([]);
   const [selectedContractId, setSelectedContractId] = useState("");
@@ -234,8 +236,8 @@ export default function ReceiptLogDecoder() {
       return;
     }
 
-    if (!(window as { ethereum?: unknown }).ethereum) {
-      toast.error("[WALLET_MISSING] 未检测到钱包，请安装 MetaMask 等浏览器钱包");
+    if (!provider) {
+      toast.error("[WALLET_MISSING] 请先连接钱包");
       return;
     }
 
@@ -251,7 +253,6 @@ export default function ReceiptLogDecoder() {
     setQueried(false);
 
     try {
-      const provider = new ethers.BrowserProvider((window as { ethereum?: ethers.Eip1193Provider }).ethereum!);
       const [tx, receipt] = await Promise.all([
         provider.getTransaction(trimmedHash),
         provider.getTransactionReceipt(trimmedHash),
@@ -313,7 +314,7 @@ export default function ReceiptLogDecoder() {
     } finally {
       setLoading(false);
     }
-  }, [currentAbi, txHash]);
+  }, [currentAbi, txHash, provider]);
 
   const handleClear = () => {
     setTxHash("");

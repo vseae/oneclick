@@ -9,6 +9,7 @@ import ToolHeader from "@/components/tools/ToolHeader";
 import ValueDisplay from "@/components/ValueDisplay";
 import { useContracts } from "@/lib/queries";
 import { MULTICALL3_ABI, getMulticall3Address } from "@/lib/multicall3";
+import { useEthersProvider } from "@/lib/use-ethers-provider";
 import { formatValueForDecimals, useValueDecimals } from "@/lib/value-decimals";
 import {
   formatResult,
@@ -62,6 +63,7 @@ interface AggregateCall {
  * revert reason (and any custom error) that Multicall3 does not return.
  */
 async function executeAggregate(
+  provider: ethers.BrowserProvider,
   chainId: number,
   iface: ethers.Interface,
   abi: ethers.InterfaceAbi,
@@ -70,10 +72,6 @@ async function executeAggregate(
   const multicallAddress = getMulticall3Address(chainId);
   if (!multicallAddress) throw new Error("当前网络未部署 Multicall3");
 
-  const ethereum = (window as { ethereum?: ethers.Eip1193Provider }).ethereum;
-  if (!ethereum) throw new Error("未检测到钱包，请安装 MetaMask 等浏览器钱包");
-
-  const provider = new ethers.BrowserProvider(ethereum);
   const runner = await getReadRunner(provider);
   const multicall = new ethers.Contract(multicallAddress, MULTICALL3_ABI, runner);
 
@@ -156,6 +154,7 @@ function copyResultValue(value: string | undefined, decimals: number | null) {
  */
 export default function BatchReadTool() {
   const { chainId } = useAccount();
+  const provider = useEthersProvider();
   const { data: contracts = [], isPending: contractsLoading } = useContracts(chainId);
   const decimals = useValueDecimals();
 
@@ -309,7 +308,13 @@ export default function BatchReadTool() {
           };
         });
 
+        if (!provider) {
+          toast.error("[WALLET_MISSING] 请先连接钱包");
+          return;
+        }
+
         const nextResults = await executeAggregate(
+          provider,
           chainId,
           iface,
           selectedContract.abi,
@@ -369,7 +374,10 @@ export default function BatchReadTool() {
         callData,
       }));
 
+      if (!provider) throw new Error("请先连接钱包");
+
       const nextResults = await executeAggregate(
+        provider,
         chainId,
         iface,
         selectedContract.abi,

@@ -9,6 +9,7 @@ import { FileSearch, Database, ClipboardPaste, ArrowRightLeft, ScrollText } from
 import ToolHeader from "@/components/tools/ToolHeader";
 import { formatResult } from "@/lib/contract-utils";
 import { listContractsByChainId } from "@/lib/local-store";
+import { useEthersProvider } from "@/lib/use-ethers-provider";
 
 type Mode = "calldata" | "txhash";
 type AbiSource = "saved" | "manual";
@@ -108,6 +109,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 export default function TxDecoderTool() {
   const { chainId } = useAccount();
+  const provider = useEthersProvider();
   const [mode, setMode] = useState<Mode>("calldata");
   const [abiSource, setAbiSource] = useState<AbiSource>("saved");
   const [calldata, setCalldata] = useState("");
@@ -226,15 +228,13 @@ export default function TxDecoderTool() {
     const abi = getAbi();
     if (!abi) return;
 
-    const ethereum = (window as { ethereum?: ethers.Eip1193Provider }).ethereum;
-    if (!ethereum) {
-      toast.error("[WALLET_MISSING] 未检测到钱包，请安装 MetaMask 等浏览器钱包");
+    if (!provider) {
+      toast.error("[WALLET_MISSING] 请先连接钱包");
       return;
     }
 
     setLoading(true);
     try {
-      const provider = new ethers.BrowserProvider(ethereum);
       const [tx, receipt] = await Promise.all([
         provider.getTransaction(trimmed),
         provider.getTransactionReceipt(trimmed),
