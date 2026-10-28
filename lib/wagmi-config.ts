@@ -13,17 +13,32 @@ import {
 } from "wagmi/chains";
 import { exsatTestnet } from "@/lib/chains";
 
+/**
+ * RainbowKit ships icons for the chains it knows about; the rest render as a
+ * bare label in the network switcher. Logos are bundled under `public/chains/`
+ * so the switcher never depends on a third-party host staying up. Testnets
+ * reuse their mainnet mark.
+ */
+const iconUrl = (file: string) => `/chains/${file}`;
+
+const sonicWithIcon = { ...sonic, iconUrl: iconUrl("sonic.png") };
+const sonicBlazeWithIcon = { ...sonicBlazeTestnet, iconUrl: iconUrl("sonic.png") };
+const exsatWithIcon = { ...exsat, iconUrl: iconUrl("exsat.png") };
+const exsatTestnetWithIcon = { ...exsatTestnet, iconUrl: iconUrl("exsat.png") };
+const monadWithIcon = { ...monad, iconUrl: iconUrl("monad.svg") };
+const monadTestnetWithIcon = { ...monadTestnet, iconUrl: iconUrl("monad.svg") };
+
 export const chains = [
   mainnet,
   sepolia,
-  sonic,
-  sonicBlazeTestnet,
+  sonicWithIcon,
+  sonicBlazeWithIcon,
   avalanche,
   avalancheFuji,
-  exsat,
-  exsatTestnet,
-  monad,
-  monadTestnet,
+  exsatWithIcon,
+  exsatTestnetWithIcon,
+  monadWithIcon,
+  monadTestnetWithIcon,
 ] as const;
 
 /**
