@@ -1,15 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Search, Wrench } from "lucide-react";
+import { Wrench } from "lucide-react";
 
 const CustomConnectButton = dynamic(() => import("@/components/CustomConnectButton"), {
   ssr: false,
 });
-
-function focusContractSearch() {
-  window.dispatchEvent(new Event("oneclick:focus-search"));
-}
 
 export default function Header() {
   return (
@@ -25,21 +21,6 @@ export default function Header() {
         </div>
 
         <div className="flex min-w-0 items-center justify-end gap-1.5">
-          <div className="hidden sm:block">
-            <button
-              type="button"
-              onClick={focusContractSearch}
-              className="terminal-btn terminal-btn-secondary h-9 px-2.5"
-              aria-label="搜索合约"
-              aria-keyshortcuts="Meta+K Control+K"
-              title="搜索合约 (⌘K)"
-            >
-              <Search size={15} aria-hidden="true" />
-              <kbd className="hidden text-[10px] font-medium text-[var(--terminal-text-secondary)] xl:inline">
-                ⌘K
-              </kbd>
-            </button>
-          </div>
           <div className="xl:hidden">
             <a
               href="#toolkit"

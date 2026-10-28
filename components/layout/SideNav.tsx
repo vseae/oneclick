@@ -94,7 +94,7 @@ export default function SideNav({
     };
   }, []);
 
-  /** Cmd/Ctrl+K and the header search button both focus the contract search. */
+  /** Cmd/Ctrl+K focuses the contract search. */
   useEffect(() => {
     const focusSearch = () => {
       const input = searchInputRef.current;
@@ -111,10 +111,8 @@ export default function SideNav({
       }
     };
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("oneclick:focus-search", focusSearch);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("oneclick:focus-search", focusSearch);
     };
   }, []);
 
