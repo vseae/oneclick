@@ -1,6 +1,7 @@
 "use client";
 
 import type { InterfaceAbi } from "ethers";
+import type { ContractDirectoryRecord, MoveContractInput } from "@/lib/types";
 
 export interface LocalContractRecord {
   id: number;
@@ -10,6 +11,7 @@ export interface LocalContractRecord {
   abi: InterfaceAbi;
   createdAt: string;
   addressChainKey: string;
+  directoryId: number | null;
 }
 
 export interface LocalHistoryRecord {
@@ -62,6 +64,7 @@ export interface AddHistoryInput {
 export interface LocalDataSnapshot {
   schemaVersion: number;
   exportedAt: string;
+  directories?: ContractDirectoryRecord[];
   contracts: Array<{
     id?: number;
     name: string;
@@ -69,6 +72,7 @@ export interface LocalDataSnapshot {
     chainId: number;
     abi: InterfaceAbi;
     createdAt?: string;
+    directoryId?: number | null;
   }>;
   history: Array<{
     id?: number;
@@ -159,12 +163,36 @@ export async function deleteContract(id: number): Promise<void> {
   await fetchJson<null>(`/api/contracts/${id}`, jsonRequest("DELETE"));
 }
 
-export async function deleteContracts(ids: number[]): Promise<void> {
-  await Promise.all(ids.map((id) => deleteContract(id)));
+export async function deleteContracts(ids: number[], chainId: number): Promise<void> {
+  await fetchJson<null>("/api/contracts/batch", jsonRequest("DELETE", { ids, chainId }));
 }
 
 export async function updateContractById(id: number, updates: UpdateContractInput): Promise<void> {
   await fetchJson<null>(`/api/contracts/${id}`, jsonRequest("PATCH", updates));
+}
+
+export async function listDirectoriesByChainId(chainId: number): Promise<ContractDirectoryRecord[]> {
+  return fetchJson(`/api/directories${buildQuery({ chainId })}`, jsonRequest("GET"));
+}
+
+export async function createDirectory(input: { name: string; chainId: number }): Promise<ContractDirectoryRecord> {
+  return fetchJson("/api/directories", jsonRequest("POST", input));
+}
+
+export async function renameDirectory(id: number, name: string): Promise<void> {
+  await fetchJson<null>(`/api/directories/${id}`, jsonRequest("PATCH", { name }));
+}
+
+export async function deleteDirectory(id: number): Promise<void> {
+  await fetchJson<null>(`/api/directories/${id}`, jsonRequest("DELETE"));
+}
+
+export async function moveContractToDirectory(id: number, input: MoveContractInput): Promise<LocalContractRecord> {
+  return fetchJson(`/api/contracts/${id}/directory`, jsonRequest("PATCH", input));
+}
+
+export async function moveContractsToDirectory(ids: number[], chainId: number, input: MoveContractInput): Promise<LocalContractRecord[]> {
+  return fetchJson("/api/contracts/batch", jsonRequest("PATCH", { ids, chainId, ...input }));
 }
 
 export async function addHistory(input: AddHistoryInput): Promise<number> {

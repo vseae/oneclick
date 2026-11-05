@@ -10,7 +10,9 @@ import type {
   UpdateContractInput,
   UpsertContractInput,
 } from "@/lib/local-store";
-import { assertContractInput, assertContractUpdate, contractInputSchema } from "@/lib/contract-validation";
+import { assertContractInput, assertContractSelection, assertContractUpdate, contractInputSchema } from "@/lib/contract-validation";
+import { assertDirectoryInput, assertMoveContractInput } from "@/lib/directory-validation";
+import type { ContractDirectoryRecord, MoveContractInput } from "@/lib/types";
 
 type SqliteDatabase = Database.Database;
 
@@ -22,6 +24,7 @@ interface ContractRow {
   abi: string;
   createdAt: string;
   addressChainKey: string;
+  directoryId: number | null;
 }
 
 interface HistoryRow {
@@ -132,6 +135,13 @@ function ensureDatabaseDirectory(dbPath: string) {
 function initializeSchema(db: SqliteDatabase) {
   db.pragma("foreign_keys = ON");
   db.exec(`
+    CREATE TABLE IF NOT EXISTS contract_directories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      chainId INTEGER NOT NULL,
+      UNIQUE(chainId, name)
+    );
+
     CREATE TABLE IF NOT EXISTS contracts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -172,6 +182,12 @@ function initializeSchema(db: SqliteDatabase) {
       ON history(chainId);
   `);
 
+  const contractColumns = db.prepare("PRAGMA table_info(contracts)").all() as Array<{ name: string }>;
+  if (!contractColumns.some((column) => column.name === "directoryId")) {
+    db.exec("ALTER TABLE contracts ADD COLUMN directoryId INTEGER REFERENCES contract_directories(id) ON DELETE SET NULL");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_contracts_directory_id ON contracts(directoryId)");
+
   // Databases created before payable values were tracked need the column added
   // in place, otherwise existing local history would be lost on upgrade.
   const historyColumns = db
@@ -185,6 +201,21 @@ function initializeSchema(db: SqliteDatabase) {
 function prepareSnapshot(snapshot: LocalDataSnapshot) {
   if (!snapshot || !Array.isArray(snapshot.contracts) || !Array.isArray(snapshot.history)) {
     throw new Error("Invalid snapshot format");
+  }
+  if (snapshot.schemaVersion !== 1 && snapshot.schemaVersion !== 2) {
+    throw new Error("Unsupported snapshot version");
+  }
+  if (snapshot.schemaVersion === 2 && !Array.isArray(snapshot.directories)) {
+    throw new Error("Snapshot must include directories");
+  }
+
+  const preparedDirectories = (snapshot.schemaVersion === 2 ? snapshot.directories! : []).map((item) => {
+    if (!item || !isPositiveInteger(item.id)) throw new Error("Snapshot contains invalid directory entries");
+    return { id: item.id, ...assertDirectoryInput(item) };
+  });
+  const directoryById = new Map(preparedDirectories.map((item) => [item.id, item]));
+  if (directoryById.size !== preparedDirectories.length) {
+    throw new Error("Snapshot contains duplicate directory IDs");
   }
 
   type PreparedContract = {
@@ -224,6 +255,13 @@ function prepareSnapshot(snapshot: LocalDataSnapshot) {
     }
 
     const normalizedAddress = normalizeAddress(parsed.data.address);
+    const directoryId = snapshot.schemaVersion === 2 ? item.directoryId ?? null : null;
+    if (directoryId !== null) {
+      const directory = directoryById.get(directoryId);
+      if (!isPositiveInteger(directoryId) || !directory || directory.chainId !== chainId) {
+        throw new Error("Snapshot contains invalid contract directory references");
+      }
+    }
     const sourceId = typeof item.id === "number" && Number.isInteger(item.id) && item.id > 0 ? item.id : undefined;
     preparedContracts.push({
       sourceId,
@@ -235,6 +273,7 @@ function prepareSnapshot(snapshot: LocalDataSnapshot) {
         abi: parsed.data.abi,
         createdAt: item.createdAt ?? new Date().toISOString(),
         addressChainKey: buildAddressChainKey(chainId, normalizedAddress),
+        directoryId,
       },
     });
   }
@@ -290,7 +329,7 @@ function prepareSnapshot(snapshot: LocalDataSnapshot) {
     });
   }
 
-  return { preparedContracts, preparedHistory, historySkipped };
+  return { preparedDirectories, preparedContracts, preparedHistory, historySkipped };
 }
 
 export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
@@ -313,6 +352,89 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
   const getContractById = (id: number): LocalContractRecord | null => {
     const row = db.prepare("SELECT * FROM contracts WHERE id = ?").get(id) as ContractRow | undefined;
     return row ? rowToContract(row) : null;
+  };
+
+  const listDirectories = (chainId?: number): ContractDirectoryRecord[] => {
+    if (typeof chainId === "number") {
+      assertValidChainId(chainId, "chainId");
+      return db.prepare("SELECT * FROM contract_directories WHERE chainId = ? ORDER BY name, id")
+        .all(chainId) as ContractDirectoryRecord[];
+    }
+    return db.prepare("SELECT * FROM contract_directories ORDER BY name, id").all() as ContractDirectoryRecord[];
+  };
+
+  const getDirectoryById = (id: number): ContractDirectoryRecord => {
+    const directory = db.prepare("SELECT * FROM contract_directories WHERE id = ?").get(id) as ContractDirectoryRecord | undefined;
+    if (!directory) throw new Error("目录不存在，可能已被删除");
+    return directory;
+  };
+
+  const assertUniqueDirectoryName = (name: string, chainId: number, id?: number) => {
+    const existing = db.prepare("SELECT id FROM contract_directories WHERE chainId = ? AND name = ?")
+      .get(chainId, name) as { id: number } | undefined;
+    if (existing && existing.id !== id) throw new Error("当前网络已存在同名目录");
+  };
+
+  const createDirectory = (rawInput: { name: string; chainId: number }): ContractDirectoryRecord => {
+    const input = assertDirectoryInput(rawInput);
+    assertUniqueDirectoryName(input.name, input.chainId);
+    const result = db.prepare("INSERT INTO contract_directories (name, chainId) VALUES (?, ?)")
+      .run(input.name, input.chainId);
+    return { id: Number(result.lastInsertRowid), ...input };
+  };
+
+  const renameDirectory = (id: number, name: string): void => {
+    const directory = getDirectoryById(id);
+    const input = assertDirectoryInput({ name, chainId: directory.chainId });
+    assertUniqueDirectoryName(input.name, input.chainId, id);
+    db.prepare("UPDATE contract_directories SET name = ? WHERE id = ?").run(input.name, id);
+  };
+
+  const deleteDirectory = (id: number): void => {
+    getDirectoryById(id);
+    db.prepare("DELETE FROM contract_directories WHERE id = ?").run(id);
+  };
+
+  const moveContractToDirectory = (id: number, rawInput: MoveContractInput): LocalContractRecord => {
+    const input = assertMoveContractInput(rawInput);
+    return db.transaction(() => {
+      const contract = getContractById(id);
+      if (!contract) throw new Error("合约不存在，可能已被删除");
+      const directoryId = "newDirectoryName" in input
+        ? createDirectory({ name: input.newDirectoryName, chainId: contract.chainId }).id
+        : input.directoryId;
+      if (directoryId !== null && getDirectoryById(directoryId).chainId !== contract.chainId) {
+        throw new Error("不能移动到其他网络的目录");
+      }
+      db.prepare("UPDATE contracts SET directoryId = ? WHERE id = ?").run(directoryId, id);
+      return { ...contract, directoryId };
+    })();
+  };
+
+  const getSelectedContracts = (ids: number[], chainId: number): LocalContractRecord[] => {
+    const selection = assertContractSelection({ ids, chainId });
+    return selection.ids.map((id) => {
+      const contract = getContractById(id);
+      if (!contract) throw new Error("选中的合约不存在，请刷新列表后重试");
+      if (contract.chainId !== selection.chainId) throw new Error("只能批量操作当前网络的合约");
+      return contract;
+    });
+  };
+
+  const moveContractsToDirectory = (ids: number[], chainId: number, rawInput: MoveContractInput): LocalContractRecord[] => {
+    const input = assertMoveContractInput(rawInput);
+    return db.transaction(() => {
+      const contracts = getSelectedContracts(ids, chainId);
+      const directoryId = "newDirectoryName" in input
+        ? createDirectory({ name: input.newDirectoryName, chainId }).id
+        : input.directoryId;
+      if (directoryId !== null && getDirectoryById(directoryId).chainId !== chainId) {
+        throw new Error("不能移动到其他网络的目录");
+      }
+      const move = db.prepare("UPDATE contracts SET directoryId = ? WHERE id = ?");
+      for (const contract of contracts) move.run(directoryId, contract.id);
+      return contracts.map((contract) => ({ ...contract, directoryId }));
+    })();
   };
 
   const upsertContract = (rawInput: UpsertContractInput): { id: number; updated: boolean } => {
@@ -368,17 +490,12 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     db.prepare("DELETE FROM contracts WHERE id = ?").run(id);
   };
 
-  const deleteContracts = (ids: number[]): void => {
-    if (ids.length === 0) {
-      return;
-    }
-
-    const remove = db.transaction((contractIds: number[]) => {
-      for (const id of contractIds) {
-        db.prepare("DELETE FROM contracts WHERE id = ?").run(id);
-      }
-    });
-    remove(ids);
+  const deleteContracts = (ids: number[], chainId: number): void => {
+    db.transaction(() => {
+      const contracts = getSelectedContracts(ids, chainId);
+      const remove = db.prepare("DELETE FROM contracts WHERE id = ?");
+      for (const contract of contracts) remove.run(contract.id);
+    })();
   };
 
   const updateContractById = (id: number, rawUpdates: UpdateContractInput): void => {
@@ -393,6 +510,7 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     const nextChainId = updates.chainId ?? existing.chainId;
     const nextAddress = normalizeAddress(updates.address ?? existing.address);
     const nextAbi = updates.abi ?? existing.abi;
+    const nextDirectoryId = nextChainId === existing.chainId ? existing.directoryId : null;
     const nextAddressChainKey = buildAddressChainKey(nextChainId, nextAddress);
     const conflict = db
       .prepare("SELECT id FROM contracts WHERE addressChainKey = ?")
@@ -405,9 +523,9 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     const update = db.transaction(() => {
       db.prepare(
         `UPDATE contracts
-         SET name = ?, address = ?, chainId = ?, abi = ?, addressChainKey = ?
+         SET name = ?, address = ?, chainId = ?, abi = ?, addressChainKey = ?, directoryId = ?
          WHERE id = ?`
-      ).run(nextName, nextAddress, nextChainId, serializeJson(nextAbi), nextAddressChainKey, id);
+      ).run(nextName, nextAddress, nextChainId, serializeJson(nextAbi), nextAddressChainKey, nextDirectoryId, id);
       syncHistoryContractFields(db, id, nextName, nextAddress);
     });
     update();
@@ -500,6 +618,7 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     const clear = db.transaction(() => {
       db.prepare("DELETE FROM history").run();
       db.prepare("DELETE FROM contracts").run();
+      db.prepare("DELETE FROM contract_directories").run();
     });
     clear();
   };
@@ -509,8 +628,9 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     const history = listHistory();
 
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       exportedAt: new Date().toISOString(),
+      directories: listDirectories(),
       contracts: contracts.map((item) => ({
         id: item.id,
         name: item.name,
@@ -518,6 +638,7 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
         chainId: item.chainId,
         abi: item.abi,
         createdAt: item.createdAt,
+        directoryId: item.directoryId,
       })),
       history: history.map((item) => ({
         id: item.id,
@@ -538,10 +659,18 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
   };
 
   const importLocalData = (snapshot: LocalDataSnapshot): ImportLocalDataResult => {
-    const { preparedContracts, preparedHistory, historySkipped: initialHistorySkipped } = prepareSnapshot(snapshot);
+    const { preparedDirectories, preparedContracts, preparedHistory, historySkipped: initialHistorySkipped } = prepareSnapshot(snapshot);
     const importTransaction = db.transaction(() => {
       db.prepare("DELETE FROM history").run();
       db.prepare("DELETE FROM contracts").run();
+      db.prepare("DELETE FROM contract_directories").run();
+
+      const directoryIdMap = new Map<number, number>();
+      for (const directory of preparedDirectories) {
+        const result = db.prepare("INSERT INTO contract_directories (name, chainId) VALUES (?, ?)")
+          .run(directory.name, directory.chainId);
+        directoryIdMap.set(directory.id, Number(result.lastInsertRowid));
+      }
 
       const contractIdMap = new Map<number, number>();
       let contractsImported = 0;
@@ -550,15 +679,16 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
 
       for (const item of preparedContracts) {
         const result = db.prepare(
-          `INSERT INTO contracts (name, address, chainId, abi, createdAt, addressChainKey)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO contracts (name, address, chainId, abi, createdAt, addressChainKey, directoryId)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
         ).run(
           item.record.name,
           item.record.address,
           item.record.chainId,
           serializeJson(item.record.abi),
           item.record.createdAt,
-          item.record.addressChainKey
+          item.record.addressChainKey,
+          item.record.directoryId === null ? null : directoryIdMap.get(item.record.directoryId)
         );
 
         if (typeof item.sourceId === "number") {
@@ -619,6 +749,12 @@ export function createSqliteStore(dbPath = DEFAULT_DB_PATH) {
     deleteContract,
     deleteContracts,
     updateContractById,
+    listDirectories,
+    createDirectory,
+    renameDirectory,
+    deleteDirectory,
+    moveContractToDirectory,
+    moveContractsToDirectory,
     addHistory,
     updateHistory,
     listHistory,

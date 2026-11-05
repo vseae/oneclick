@@ -42,6 +42,18 @@ export const contractInputSchema = z.object({
 
 export const contractUpdateSchema = contractInputSchema.partial();
 
+const contractSelectionSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1, "请至少选择一个合约")
+    .transform((ids) => [...new Set(ids)]),
+  chainId: contractInputSchema.shape.chainId,
+});
+
+export function assertContractSelection(value: unknown) {
+  const result = contractSelectionSchema.safeParse(value);
+  if (!result.success) throw new Error(result.error.issues[0]?.message ?? "合约选择无效");
+  return result.data;
+}
+
 export type ContractInput = z.infer<typeof contractInputSchema>;
 export type ContractUpdateInput = z.infer<typeof contractUpdateSchema>;
 

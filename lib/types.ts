@@ -8,4 +8,15 @@ export interface ContractRecord {
   chainId: number;
   abi: InterfaceAbi;
   createdAt?: string;
+  directoryId?: number | null;
 }
+
+export interface ContractDirectoryRecord {
+  id: number;
+  name: string;
+  chainId: number;
+}
+
+export type MoveContractInput =
+  | { directoryId: number | null }
+  | { newDirectoryName: string };

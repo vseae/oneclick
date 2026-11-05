@@ -75,13 +75,14 @@ export default function Home() {
     setCurrentContractId(null);
   }, []);
 
-  const handleDeleteContract = useCallback((id: number) => {
+  const handleDeleteContracts = useCallback((ids: number[]) => {
+    const deletedIds = new Set(ids);
     queryClient.setQueryData<ContractRecord[]>(
       contractKeys.byChain(chainId),
-      (current) => current?.filter((contract) => contract.id !== id)
+      (current) => current?.filter((contract) => !deletedIds.has(contract.id))
     );
-    setOpenPanelIds((current) => current.filter((panelId) => panelId !== id));
-    setCurrentContractId((current) => (current === id ? null : current));
+    setOpenPanelIds((current) => current.filter((panelId) => !deletedIds.has(panelId)));
+    setCurrentContractId((current) => (current !== null && deletedIds.has(current) ? null : current));
     void queryClient.invalidateQueries({ queryKey: historyKeys.byChain(chainId) });
   }, [queryClient, chainId]);
 
@@ -108,7 +109,7 @@ export default function Home() {
         isLoading={contractsPending && typeof chainId === "number"}
         hasError={Boolean(contractsError)}
         onSelectContract={handleSelectContract}
-        onDeleteContract={handleDeleteContract}
+        onDeleteContracts={handleDeleteContracts}
         onCatalogChanged={handleCatalogChanged}
       />
 

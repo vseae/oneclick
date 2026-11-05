@@ -3,10 +3,11 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   listContractsByChainId,
+  listDirectoriesByChainId,
   listHistory,
   type LocalHistoryRecord,
 } from "@/lib/local-store";
-import type { ContractRecord } from "@/lib/types";
+import type { ContractDirectoryRecord, ContractRecord } from "@/lib/types";
 
 export const contractKeys = {
   byChain: (chainId?: number) => ["contracts", chainId] as const,
@@ -15,6 +16,19 @@ export const contractKeys = {
 export const historyKeys = {
   byChain: (chainId?: number) => ["history", chainId] as const,
 };
+
+export const directoryKeys = {
+  byChain: (chainId?: number) => ["directories", chainId] as const,
+};
+
+export function useDirectories(chainId?: number) {
+  return useQuery<ContractDirectoryRecord[]>({
+    queryKey: directoryKeys.byChain(chainId),
+    queryFn: () => listDirectoriesByChainId(chainId as number),
+    enabled: typeof chainId === "number",
+    staleTime: 30_000,
+  });
+}
 
 export function useContracts(chainId?: number) {
   return useQuery<ContractRecord[]>({

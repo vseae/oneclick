@@ -8,6 +8,14 @@ This context defines the language used by the contract catalog and the contract 
 The single network-scoped list of imported contracts used for search, selection, management, and opening an interaction panel.
 _Avoid_: Main list, contract table
 
+**Contract Directory**:
+A named, single-level group of imported contracts within the Contract Catalog, with each contract belonging to at most one directory. Deleting a directory returns its contracts to the ungrouped catalog.
+_Avoid_: Contract workspace, contract tab (when referring to a group of contracts)
+
+**Ungrouped Contract**:
+An imported contract that does not belong to a Contract Directory.
+_Avoid_: Orphaned contract
+
 **Interaction Panel**:
 The workspace for reading from and writing to the currently selected contract.
 _Avoid_: Contract tab, contract window
@@ -15,6 +23,14 @@ _Avoid_: Contract tab, contract window
 **Current Contract**:
 The one contract whose interaction panel is currently open.
 _Avoid_: Active contracts, selected contracts (when referring to multiple items)
+
+**Contract Selection**:
+The set of contracts chosen in the current network's Contract Catalog for a bulk move or deletion. This set is independent of the Current Contract open in the Interaction Panel.
+_Avoid_: Current contracts, active contracts
+
+**Contract Selection Mode**:
+The Contract Catalog state in which contracts are chosen for bulk operations while the Current Contract remains independent.
+_Avoid_: Edit mode, interaction mode
 
 **Selector**:
 The ABI-derived identifier for a contract function, event, or custom error, shown with its canonical signature.

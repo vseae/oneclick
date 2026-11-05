@@ -2,10 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Check, FileCode2, Pencil, Plug, Trash2 } from "lucide-react";
+import { Check, FileCode2, FolderInput, MousePointer2, Pencil, Plug, Trash2, X } from "lucide-react";
 
 export type SortBy = "newest" | "oldest" | "name-asc" | "name-desc";
-export type ContractMenuAction = "open" | "edit" | "selector" | "delete";
+export type ContractMenuAction = "open" | "edit" | "selector" | "move" | "delete" | "select" | "exitSelection";
 
 interface MenuPosition {
   x: number;
@@ -14,11 +14,13 @@ interface MenuPosition {
 
 interface ActionsMenuProps {
   position: MenuPosition;
+  selectionMode: boolean;
+  selectedCount: number;
   onAction: (action: ContractMenuAction) => void;
   onClose: (restoreFocus?: boolean) => void;
 }
 
-export function ActionsMenu({ position, onAction, onClose }: ActionsMenuProps) {
+export function ActionsMenu({ position, selectionMode, selectedCount, onAction, onClose }: ActionsMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -58,6 +60,11 @@ export function ActionsMenu({ position, onAction, onClose }: ActionsMenuProps) {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onClose();
       }}
     >
+      <button type="button" role="menuitem" onClick={() => onAction(selectionMode ? "exitSelection" : "select")} className="menu-item">
+        {selectionMode ? <X size={14} aria-hidden="true" /> : <MousePointer2 size={14} aria-hidden="true" />}
+        {selectionMode ? "退出选择" : "选中"}
+      </button>
+      <div className="my-1 border-t border-[var(--terminal-separator)]" />
       <button type="button" role="menuitem" onClick={() => onAction("open")} className="menu-item">
         <Plug size={14} aria-hidden="true" />打开交互面板
       </button>
@@ -67,8 +74,11 @@ export function ActionsMenu({ position, onAction, onClose }: ActionsMenuProps) {
       <button type="button" role="menuitem" onClick={() => onAction("selector")} className="menu-item">
         <FileCode2 size={14} aria-hidden="true" />查看 Selector
       </button>
+      <button type="button" role="menuitem" onClick={() => onAction("move")} className="menu-item">
+        <FolderInput size={14} aria-hidden="true" />{selectedCount > 1 ? `批量移动 (${selectedCount})` : "移动到目录"}
+      </button>
       <button type="button" role="menuitem" onClick={() => onAction("delete")} className="menu-item text-[var(--terminal-red)]">
-        <Trash2 size={14} aria-hidden="true" />删除合约
+        <Trash2 size={14} aria-hidden="true" />{selectedCount > 1 ? `批量删除 (${selectedCount})` : "删除合约"}
       </button>
     </div>,
     document.body
