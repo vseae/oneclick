@@ -9,15 +9,15 @@ import {
 
 describe("multicall3 registry", () => {
   it("resolves the canonical deployment for supported chains", () => {
-    for (const chainId of [1, 11155111, 146, 43114, 43113, 143, 10143]) {
+    for (const chainId of [1, 11155111, 146, 14601, 43114, 43113, 143, 10143]) {
       expect(getMulticall3Address(chainId)).toBe(MULTICALL3_CANONICAL_ADDRESS);
       expect(isMulticall3Supported(chainId)).toBe(true);
     }
   });
 
   it("returns null for chains without a deployment", () => {
-    // Sonic Blaze, exSat and exSat Testnet are not in the upstream deployment list.
-    for (const chainId of [64165, 7200, 840000, 999999999999]) {
+    // exSat and exSat Testnet are not in the upstream deployment list.
+    for (const chainId of [7200, 840000, 999999999999]) {
       expect(getMulticall3Address(chainId)).toBeNull();
       expect(isMulticall3Supported(chainId)).toBe(false);
     }

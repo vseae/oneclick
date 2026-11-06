@@ -5,8 +5,10 @@
  * file in https://github.com/mds1/multicall). Regenerate this list when the
  * upstream deployment set changes.
  *
- * Chains that are absent here have no Multicall3 deployment, so batch reads must
- * stay disabled for them.
+ * Sonic Testnet (14601) is also included based on its verified on-chain
+ * deployment, which is not yet in the upstream list.
+ *
+ * Chains absent here have no known deployment, so batch reads stay disabled.
  */
 
 export const MULTICALL3_CANONICAL_ADDRESS = "0xcA11bde05977b3631167028862bE2a173976CA11";
@@ -27,7 +29,7 @@ const CANONICAL_CHAIN_IDS: readonly number[] = [
   5464, 5555, 5611, 5700, 5845, 5888, 6342, 6699, 7000, 7001, 7070, 7518,
   7560, 7700, 7701, 7869, 7979, 8082, 8131, 8453, 8822, 8899, 8911, 9000,
   9001, 9393, 9745, 10088, 10143, 10200, 10242, 10243, 11119, 11235, 11503, 12553,
-  13371, 13473, 15557, 16661, 17000, 17777, 23294, 23451, 24101, 28802, 31612, 32520,
+  13371, 13473, 14601, 15557, 16661, 17000, 17777, 23294, 23451, 24101, 28802, 31612, 32520,
   32659, 33139, 34443, 35441, 35442, 35443, 41455, 41923, 42161, 42170, 42220, 42262,
   42299, 42766, 42793, 43111, 43113, 43114, 44787, 46688, 48899, 53302, 53935, 55244,
   57000, 57073, 58008, 59140, 59141, 59144, 59902, 60808, 64240, 71401, 80001, 80002,

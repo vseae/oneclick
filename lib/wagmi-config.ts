@@ -5,13 +5,12 @@ import {
   sepolia,
   sonic,
   exsat,
-  sonicBlazeTestnet,
   avalanche,
   avalancheFuji,
   monad,
   monadTestnet,
 } from "wagmi/chains";
-import { exsatTestnet } from "@/lib/chains";
+import { exsatTestnet, sonicTestnet } from "@/lib/chains";
 
 /**
  * RainbowKit ships icons for the chains it knows about; the rest render as a
@@ -22,7 +21,7 @@ import { exsatTestnet } from "@/lib/chains";
 const iconUrl = (file: string) => `/chains/${file}`;
 
 const sonicWithIcon = { ...sonic, iconUrl: iconUrl("sonic.png") };
-const sonicBlazeWithIcon = { ...sonicBlazeTestnet, iconUrl: iconUrl("sonic.png") };
+const sonicTestnetWithIcon = { ...sonicTestnet, iconUrl: iconUrl("sonic.png") };
 const exsatWithIcon = { ...exsat, iconUrl: iconUrl("exsat.png") };
 const exsatTestnetWithIcon = { ...exsatTestnet, iconUrl: iconUrl("exsat.png") };
 const monadWithIcon = { ...monad, iconUrl: iconUrl("monad.svg") };
@@ -32,7 +31,7 @@ export const chains = [
   mainnet,
   sepolia,
   sonicWithIcon,
-  sonicBlazeWithIcon,
+  sonicTestnetWithIcon,
   avalanche,
   avalancheFuji,
   exsatWithIcon,
@@ -60,7 +59,7 @@ export const config = getDefaultConfig({
     [mainnet.id]: http(),
     [sepolia.id]: http(),
     [sonic.id]: http(),
-    [sonicBlazeTestnet.id]: http(),
+    [sonicTestnet.id]: http(),
     [avalanche.id]: http(),
     [avalancheFuji.id]: http(),
     [exsat.id]: http(),
