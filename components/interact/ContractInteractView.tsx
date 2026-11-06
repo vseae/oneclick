@@ -34,6 +34,7 @@ import { addHistory, updateHistory as updateLocalHistory } from "@/lib/local-sto
 import type { ContractRecord } from "@/lib/types";
 import ValueDisplay from "@/components/ValueDisplay";
 import ValueDecimalsControl from "@/components/ValueDecimalsControl";
+import TransactionHash from "@/components/TransactionHash";
 
 interface ContractInteractViewProps {
   contract: ContractRecord;
@@ -89,6 +90,7 @@ function MethodItem({
   onSimulate,
   loading,
   result,
+  transaction,
 }: {
   method: ethers.FunctionFragment;
   isWrite: boolean;
@@ -97,6 +99,7 @@ function MethodItem({
   onSimulate?: (params: string[], options: ExecuteOptions) => Promise<SimulationResult>;
   loading: boolean;
   result?: string;
+  transaction?: { hash: string; chainId: number };
 }) {
   const [expanded, setExpanded] = useState(false);
   const [params, setParams] = useState<string[]>(new Array(method.inputs.length).fill(""));
@@ -458,6 +461,12 @@ function MethodItem({
               <ValueDisplay value={result} className="text-[13px] text-[var(--terminal-text)]" />
             </div>
           )}
+          {transaction && (
+            <div className="p-3 bg-[var(--terminal-fill)] border border-[var(--terminal-separator)]" aria-live="polite">
+              <p className="mb-1 text-[12px] font-medium text-[var(--terminal-text-secondary)]">Transaction Hash</p>
+              <TransactionHash hash={transaction.hash} chainId={transaction.chainId} />
+            </div>
+          )}
         </div>
       </animated.div>
     </div>
@@ -469,6 +478,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   const provider = useEthersProvider();
   const [activeTab, setActiveTab] = useState<"read" | "write">("read");
   const [results, setResults] = useState<Record<string, string>>({});
+  const [transactions, setTransactions] = useState<Record<string, { hash: string; chainId: number }>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [methodSearch, setMethodSearch] = useState("");
 
@@ -662,8 +672,15 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   ) => {
     const key = getMethodKey(method);
     setLoading(prev => ({ ...prev, [key]: true }));
+    setResults(prev => ({ ...prev, [key]: "" }));
+    setTransactions(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
     let historyId: number | null = null;
     let txHash: string | undefined;
+    let transactionChainId = chainId ?? contract.chainId;
     try {
       const provider = getProvider();
       const signer = await provider.getSigner();
@@ -674,9 +691,13 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
         buildOverrides(options)
       );
       txHash = tx.hash;
+      transactionChainId = Number(tx.chainId);
+      setTransactions(prev => ({ ...prev, [key]: { hash: tx.hash, chainId: transactionChainId } }));
+      setResults(prev => ({ ...prev, [key]: "交易已发送，等待确认…" }));
 
       historyId = await saveHistory({
         ...getHistoryBase(method, parsedParams),
+        chainId: transactionChainId,
         txHash,
         value: options.valueWei,
         result: "⏳ Transaction sent, waiting for confirmation...",
@@ -684,7 +705,8 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
 
       toast.success("交易已发送");
       const receipt = await tx.wait();
-      const confirmedResult = `Tx: ${receipt.hash}`;
+      const confirmedResult = "交易已确认";
+      setTransactions(prev => ({ ...prev, [key]: { hash: receipt.hash, chainId: transactionChainId } }));
 
       if (historyId) {
         await updateHistory(historyId, {
@@ -707,6 +729,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
         } else {
           await saveHistory({
             ...getHistoryBase(method, params),
+            chainId: transactionChainId,
             txHash,
             value: options.valueWei,
             error: message,
@@ -856,6 +879,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
                     }
                     loading={!!loading[getMethodKey(method)]}
                     result={results[getMethodKey(method)]}
+                    transaction={transactions[getMethodKey(method)]}
                   />
                 ))
               )}

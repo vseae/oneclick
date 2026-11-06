@@ -13,6 +13,7 @@ import { useReducedMotion } from "@/lib/use-reduced-motion";
 import ValueDisplay from "@/components/ValueDisplay";
 import { formatAmount } from "@/lib/convert";
 import ValueDecimalsControl from "@/components/ValueDecimalsControl";
+import TransactionHash from "@/components/TransactionHash";
 
 export default function HistoryView() {
   const { chainId } = useAccount();
@@ -198,9 +199,9 @@ export default function HistoryView() {
                     <p className="mt-1 text-[12px] text-[var(--terminal-red)] break-all">ERROR: {item.error}</p>
                   )}
                   {item.txHash && (
-                    <p className="text-[12px] font-mono text-[var(--terminal-text-secondary)] mt-1 truncate">
-                      Tx: {item.txHash.slice(0, 10)}&hellip;{item.txHash.slice(-8)}
-                    </p>
+                    <div className="text-[12px] font-mono text-[var(--terminal-text-secondary)] mt-1">
+                      Tx: <TransactionHash hash={item.txHash} chainId={item.chainId} abbreviated />
+                    </div>
                   )}
                 </animated.div>
               );
