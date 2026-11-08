@@ -16,38 +16,57 @@ const abi = [
 ];
 
 describe("method param parsing", () => {
-  it("parses primitives by ABI type", () => {
-    expect(parseMethodParam("uint256", "42")).toBe(BigInt(42));
-    expect(parseMethodParam("uint256", "")).toBe(BigInt(0));
-    expect(parseMethodParam("int128", "-5")).toBe(BigInt(-5));
+  it("rejects missing values and invalid booleans without changing their meaning", () => {
+    expect(() => parseMethodParam("uint256", "")).toThrow();
+    expect(() => parseMethodParam("bool", "")).toThrow();
+    expect(() => parseMethodParam("bool", "anything")).toThrow();
     expect(parseMethodParam("bool", "true")).toBe(true);
     expect(parseMethodParam("bool", "false")).toBe(false);
-    expect(parseMethodParam("address", "0xabc")).toBe("0xabc");
-    expect(parseMethodParam("string", "hello")).toBe("hello");
+    expect(parseMethodParam("string", "")).toBe("");
+    expect(parseMethodParam("string", '""')).toBe('""');
+    expect(parseMethodParam("string", "  hello  ")).toBe("  hello  ");
   });
 
-  it("parses arrays as JSON", () => {
-    expect(parseMethodParam("uint256[]", "[1,2]")).toEqual([1, 2]);
-    expect(parseMethodParam("uint256[]", "")).toEqual([]);
-    expect(() => parseMethodParam("uint256[]", "not-json")).toThrow();
+  it("checks integer boundaries, addresses, and exact byte lengths", () => {
+    expect(parseMethodParam("int8", "-128")).toBe(BigInt(-128));
+    expect(parseMethodParam("uint8", "255")).toBe(BigInt(255));
+    expect(() => parseMethodParam("int8", "-129")).toThrow(/范围/);
+    expect(() => parseMethodParam("uint8", "256")).toThrow(/范围/);
+    expect(() => parseMethodParam("uint8", "-1")).toThrow(/范围/);
+    expect(() => parseMethodParam("address", "0xabc")).toThrow(/地址/);
+    expect(parseMethodParam("bytes", "0x")).toBe("0x");
+    expect(parseMethodParam("bytes2", "0x1234")).toBe("0x1234");
+    expect(() => parseMethodParam("bytes2", "0x12")).toThrow(/2 字节/);
+    expect(() => parseMethodParam("bytes", "0xabc")).toThrow();
   });
 
-  it("maps every input of a function fragment", () => {
+  it("validates fixed and nested arrays without JSON number precision loss", () => {
+    expect(parseMethodParam("uint256[2]", '["9007199254740993","2"]')).toEqual([BigInt("9007199254740993"), BigInt(2)]);
+    expect(parseMethodParam("uint8[]", "[]")).toEqual([]);
+    expect(() => parseMethodParam("uint8[2]", '["1"]')).toThrow(/2 个元素/);
+    expect(() => parseMethodParam("uint256[]", "[9007199254740993]")).toThrow();
+    expect(() => parseMethodParam("uint8[]", "")).toThrow();
+    expect(() => parseMethodParam("uint8[]", "not-json")).toThrow();
+    expect(() => parseMethodParam("uint8[][]", '[["256"]]')).toThrow(/\[0\]\[0\]/);
+  });
+
+  it("validates tuple arrays and objects recursively", () => {
+    const param = ethers.ParamType.from("tuple(address owner, uint8 amount, string note, bool active)");
+    const address = "0x0000000000000000000000000000000000000001";
+    expect(parseMethodParam(param, JSON.stringify([address, "5", "", true]))).toEqual([address, BigInt(5), "", true]);
+    expect(parseMethodParam(param, JSON.stringify({ owner: address, amount: "5", note: "", active: true }))).toEqual([address, BigInt(5), "", true]);
+    expect(() => parseMethodParam(param, JSON.stringify({ owner: address, amount: "5", note: "" }))).toThrow(/字段/);
+    expect(() => parseMethodParam(param, `{"owner":"${address}","amount":"5","amount":"6","note":"","active":true}`)).toThrow(/重复字段/);
+    expect(() => parseMethodParam(param, JSON.stringify([address, "256", "", true]))).toThrow(/amount/);
+    expect(() => parseMethodParam(param, JSON.stringify([address, "5", "", "true"]))).toThrow(/active/);
+  });
+
+  it("requires every non-string input and keeps ABI field names in errors", () => {
     const iface = new ethers.Interface(abi);
     const transfer = iface.getFunction("transfer")!;
-    expect(parseMethodParams(transfer, ["0x0000000000000000000000000000000000000001", "100"])).toEqual([
-      "0x0000000000000000000000000000000000000001",
-      BigInt(100),
-    ]);
-
+    expect(() => parseMethodParams(transfer, [])).toThrow(/to/);
     const setValues = iface.getFunction("setValues")!;
-    expect(parseMethodParams(setValues, ["[7,8]", "true"])).toEqual([[7, 8], true]);
-  });
-
-  it("falls back to zero for missing raw inputs", () => {
-    const iface = new ethers.Interface(abi);
-    const transfer = iface.getFunction("transfer")!;
-    expect(parseMethodParams(transfer, [])).toEqual(["", BigInt(0)]);
+    expect(parseMethodParams(setValues, ['["7","8"]', "true"])).toEqual([[BigInt(7), BigInt(8)], true]);
   });
 });
 

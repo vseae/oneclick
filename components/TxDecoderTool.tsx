@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
+import { formatNativeAmount } from "@/lib/native-currency";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
@@ -235,9 +236,10 @@ export default function TxDecoderTool() {
 
     setLoading(true);
     try {
-      const [tx, receipt] = await Promise.all([
+      const [tx, receipt, network] = await Promise.all([
         provider.getTransaction(trimmed),
         provider.getTransactionReceipt(trimmed),
+        provider.getNetwork(),
       ]);
 
       if (!tx) {
@@ -250,7 +252,7 @@ export default function TxDecoderTool() {
       setTxInfo({
         from: tx.from,
         to: tx.to || "合约创建",
-        value: ethers.formatEther(tx.value) + " ETH",
+        value: formatNativeAmount(tx.value, Number(network.chainId)),
         gasUsed: receipt ? receipt.gasUsed.toString() : "N/A",
         blockNumber: tx.blockNumber || 0,
       });

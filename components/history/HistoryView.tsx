@@ -11,7 +11,7 @@ import { Trash2, Clock } from "lucide-react";
 import { useHydrated } from "@/lib/use-hydrated";
 import { useReducedMotion } from "@/lib/use-reduced-motion";
 import ValueDisplay from "@/components/ValueDisplay";
-import { formatAmount } from "@/lib/convert";
+import { formatNativeAmount } from "@/lib/native-currency";
 import ValueDecimalsControl from "@/components/ValueDecimalsControl";
 import TransactionHash from "@/components/TransactionHash";
 
@@ -186,8 +186,8 @@ export default function HistoryView() {
                   )}
                   {item.value && (
                     <p className="text-[12px] text-[var(--terminal-text-secondary)]">
-                      VALUE: {formatAmount(BigInt(item.value), 18)} ETH
-                      <span className="ml-1 font-mono opacity-60">({item.value} wei)</span>
+                      VALUE: {formatNativeAmount(BigInt(item.value), item.chainId)}
+                      <span className="ml-1 font-mono opacity-60">({item.value} 最小单位)</span>
                     </p>
                   )}
                   {item.result && (

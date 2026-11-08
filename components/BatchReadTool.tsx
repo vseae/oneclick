@@ -1,5 +1,7 @@
 "use client";
 
+import AbiParamInput from "@/components/AbiParamInput";
+
 import { useMemo, useState } from "react";
 import { ethers } from "ethers";
 import { useAccount } from "wagmi";
@@ -167,6 +169,7 @@ export default function BatchReadTool() {
   const [selectedTargetIds, setSelectedTargetIds] = useState<number[]>([]);
   const [results, setResults] = useState<RunResult[]>([]);
   const [running, setRunning] = useState(false);
+  const [showParamErrors, setShowParamErrors] = useState(false);
 
   const selectedContract = useMemo(
     () => contracts.find((contract) => String(contract.id) === selectedContractId),
@@ -265,6 +268,7 @@ export default function BatchReadTool() {
   };
 
   const runBatch = async () => {
+    setShowParamErrors(true);
     const ethereum = (window as { ethereum?: ethers.Eip1193Provider }).ethereum;
     if (!ethereum) {
       toast.error("[WALLET_MISSING] 未检测到钱包，请安装 MetaMask 等浏览器钱包");
@@ -559,27 +563,7 @@ export default function BatchReadTool() {
                       {checked && method.inputs.length > 0 && (
                         <div className="space-y-2 px-2.5 pb-2.5 pl-8">
                           {method.inputs.map((input, paramIndex) => (
-                            <div key={paramIndex}>
-                              <label
-                                htmlFor={`mm-${method.selector}-${paramIndex}`}
-                                className="mb-1 block text-[11px] font-medium text-[var(--terminal-text-secondary)]"
-                              >
-                                {input.name || `param${paramIndex}`}
-                                <span className="ml-1 opacity-60">({input.type})</span>
-                              </label>
-                              <input
-                                id={`mm-${method.selector}-${paramIndex}`}
-                                name={`mm-${method.selector}-${paramIndex}`}
-                                value={methodParams[method.selector]?.[paramIndex] ?? ""}
-                                onChange={(event) =>
-                                  setMethodParam(method, paramIndex, event.target.value)
-                                }
-                                className="terminal-input font-mono text-[13px]"
-                                placeholder={`${input.type}…`}
-                                autoComplete="off"
-                                spellCheck={false}
-                              />
-                            </div>
+                            <AbiParamInput key={paramIndex} index={paramIndex} input={input} id={`mm-${method.selector}-${paramIndex}`} value={methodParams[method.selector]?.[paramIndex] ?? ""} onChange={(value) => setMethodParam(method, paramIndex, value)} showError={showParamErrors} />
                           ))}
                         </div>
                       )}
@@ -618,25 +602,7 @@ export default function BatchReadTool() {
                     [PARAMS]
                   </p>
                   {sourceMethod.inputs.map((input, index) => (
-                    <div key={index}>
-                      <label
-                        htmlFor={`mc-param-${index}`}
-                        className="mb-1 block text-[11px] font-medium text-[var(--terminal-text-secondary)]"
-                      >
-                        {input.name || `param${index}`}
-                        <span className="ml-1 opacity-60">({input.type})</span>
-                      </label>
-                      <input
-                        id={`mc-param-${index}`}
-                        name={`mc-param-${index}`}
-                        value={sharedParams[index] ?? ""}
-                        onChange={(event) => setSharedParam(index, event.target.value)}
-                        className="terminal-input font-mono text-[13px]"
-                        placeholder={`${input.type}…`}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </div>
+                    <AbiParamInput key={index} index={index} input={input} id={`mc-param-${index}`} value={sharedParams[index] ?? ""} onChange={(value) => setSharedParam(index, value)} showError={showParamErrors} />
                   ))}
                 </div>
               )}

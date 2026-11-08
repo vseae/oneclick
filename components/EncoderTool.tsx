@@ -8,6 +8,7 @@ import { Braces, ClipboardPaste, Code, Copy, Database } from "lucide-react";
 import ToolHeader from "@/components/tools/ToolHeader";
 import { useContracts } from "@/lib/queries";
 import { parseMethodParam, parseMethodParams } from "@/lib/contract-utils";
+import AbiParamInput from "@/components/AbiParamInput";
 
 type Mode = "calldata" | "constructor";
 type AbiSource = "saved" | "manual";
@@ -65,6 +66,7 @@ export default function EncoderTool() {
   const [manualAbi, setManualAbi] = useState("");
   const [selectedFunction, setSelectedFunction] = useState("");
   const [params, setParams] = useState<string[]>([]);
+  const [showParamErrors, setShowParamErrors] = useState(false);
   const [ctorParams, setCtorParams] = useState<string[]>([]);
   const [callOutput, setCallOutput] = useState<CallOutput | null>(null);
   const [ctorOutput, setCtorOutput] = useState<string | null>(null);
@@ -201,6 +203,7 @@ export default function EncoderTool() {
   };
 
   const handleEncodeCall = () => {
+    setShowParamErrors(true);
     setError(null);
     if (!iface) {
       fail("[INPUT_REQUIRED]", "请先选择已保存的合约或粘贴 ABI JSON");
@@ -225,6 +228,7 @@ export default function EncoderTool() {
   };
 
   const handleEncodeConstructor = () => {
+    setShowParamErrors(true);
     setError(null);
     if (!iface) {
       fail("[INPUT_REQUIRED]", "请先选择已保存的合约或粘贴 ABI JSON");
@@ -233,7 +237,7 @@ export default function EncoderTool() {
 
     try {
       const values = ctorInputs.map((input, index) =>
-        parseMethodParam(input.type, ctorParams[index] ?? "")
+        parseMethodParam(input, ctorParams[index] ?? "")
       );
       const data = iface.encodeDeploy(values);
       setCtorOutput(data);
@@ -431,28 +435,7 @@ export default function EncoderTool() {
                   ) : (
                     <div className="space-y-3">
                       {methodInputs.map((input, index) => (
-                        <div key={index}>
-                          <label
-                            htmlFor={`encoder-param-${index}`}
-                            className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1"
-                          >
-                            {input.name || `param${index}`}
-                            <span className="ml-1 opacity-60">({input.type})</span>
-                          </label>
-                          <div className="terminal-prompt-wrap">
-                            <input
-                              id={`encoder-param-${index}`}
-                              name={`encoder-param-${index}`}
-                              type="text"
-                              value={params[index] ?? ""}
-                              onChange={(e) => changeParam(index, e.target.value)}
-                              className="terminal-input font-mono text-[13px]"
-                              placeholder={`${input.type}…`}
-                              autoComplete="off"
-                              spellCheck={false}
-                            />
-                          </div>
-                        </div>
+                        <AbiParamInput key={index} index={index} input={input} id={`encoder-param-${index}`} value={params[index] ?? ""} onChange={(value) => changeParam(index, value)} showError={showParamErrors} />
                       ))}
                     </div>
                   )
@@ -480,28 +463,7 @@ export default function EncoderTool() {
             ) : (
               <div className="space-y-3">
                 {ctorInputs.map((input, index) => (
-                  <div key={index}>
-                    <label
-                      htmlFor={`encoder-ctor-${index}`}
-                      className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1"
-                    >
-                      {input.name || `param${index}`}
-                      <span className="ml-1 opacity-60">({input.type})</span>
-                    </label>
-                    <div className="terminal-prompt-wrap">
-                      <input
-                        id={`encoder-ctor-${index}`}
-                        name={`encoder-ctor-${index}`}
-                        type="text"
-                        value={ctorParams[index] ?? ""}
-                        onChange={(e) => changeCtorParam(index, e.target.value)}
-                        className="terminal-input font-mono text-[13px]"
-                        placeholder={`${input.type}…`}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </div>
-                  </div>
+                  <AbiParamInput key={index} index={index} input={input} id={`encoder-ctor-${index}`} value={ctorParams[index] ?? ""} onChange={(value) => changeCtorParam(index, value)} showError={showParamErrors} />
                 ))}
               </div>
             )}

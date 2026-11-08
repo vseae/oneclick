@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { ethers } from "ethers";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
@@ -27,6 +27,9 @@ import {
   parseMethodParams,
 } from "@/lib/contract-utils";
 import { parseAmount } from "@/lib/convert";
+import { formatNativeAmount, getNativeChain, getNativeCurrency } from "@/lib/native-currency";
+import AbiParamInput from "@/components/AbiParamInput";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { formatValueForDecimals, useValueDecimals } from "@/lib/value-decimals";
 import { useReducedMotion } from "@/lib/use-reduced-motion";
 import { useEthersProvider } from "@/lib/use-ethers-provider";
@@ -50,8 +53,9 @@ interface GasEstimate {
 
 /** Optional transaction overrides collected by a method form. */
 interface ExecuteOptions {
-  /** Decimal wei string; absent means no ETH is attached. */
+  /** Decimal smallest-unit amount; absent means no native currency is attached. */
   valueWei?: string;
+  expectedAccount?: string;
 }
 
 interface SimulationResult {
@@ -91,6 +95,8 @@ function MethodItem({
   loading,
   result,
   transaction,
+  contract,
+  onCheckWallet,
 }: {
   method: ethers.FunctionFragment;
   isWrite: boolean;
@@ -100,6 +106,8 @@ function MethodItem({
   loading: boolean;
   result?: string;
   transaction?: { hash: string; chainId: number };
+  contract: ContractRecord;
+  onCheckWallet: (expectedAccount?: string) => Promise<string>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [params, setParams] = useState<string[]>(new Array(method.inputs.length).fill(""));
@@ -110,21 +118,42 @@ function MethodItem({
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [simulating, setSimulating] = useState(false);
   const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [showParamErrors, setShowParamErrors] = useState(false);
+  const [pendingWrite, setPendingWrite] = useState<{ params: string[]; options: ExecuteOptions; parsed: unknown[]; error?: string } | null>(null);
+  const [failedWrite, setFailedWrite] = useState<{ params: string[]; options: ExecuteOptions; parsed: unknown[]; error?: string } | null>(null);
+  const revision = useRef(0);
   const decimals = useValueDecimals();
   const reducedMotion = useReducedMotion();
   const convertedResult = result ? formatValueForDecimals(result, decimals) : null;
 
   const payable = isPayableMethod(method);
 
-  // Payable methods need an ETH amount; it is parsed with the same helper the
-  // unit converter uses so `0.1` and `0x…` both work.
-  const valueParse = payable && valueInput.trim() ? parseAmount(valueInput, 18) : null;
-  const valueError = valueParse && !valueParse.ok ? valueParse.error : null;
+  const currency = getNativeCurrency(contract.chainId);
+  const valueText = valueInput.trim();
+  const validNumber = /^(?:\d+(?:\.\d*)?|\.\d+|0x[0-9a-f]+)$/i.test(valueText);
+  const unknownZero = /^(?:0+(?:\.0*)?|\.0+|0x0+)$/i.test(valueText);
+  const valueParse = payable && valueText && currency && validNumber ? parseAmount(valueText, currency.decimals) : null;
+  const valueError = !payable || !valueText ? null : !validNumber ? "请输入有效的原生币金额" :
+    !currency && !unknownZero ? "此网络缺少原生币信息，不能发送非零金额" :
+    valueParse && !valueParse.ok ? valueParse.error :
+    valueParse?.ok && valueParse.value >= BigInt(2) ** BigInt(256) ? "金额超出交易支持的范围" : null;
 
   const buildOptions = (): ExecuteOptions =>
-    valueParse?.ok && valueParse.value > BigInt(0)
-      ? { valueWei: valueParse.value.toString() }
-      : {};
+    valueParse?.ok && valueParse.value > BigInt(0) ? { valueWei: valueParse.value.toString() } : {};
+
+  const invalidate = () => {
+    revision.current += 1;
+    setPreflightError(null);
+    setFailedWrite(null);
+    setSimulation(null);
+    setPendingWrite(null);
+    setGasEstimate(null);
+  };
+  const validate = () => {
+    setShowParamErrors(true);
+    try { return parseMethodParams(method, params); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "参数无效"); return null; }
+  };
 
   const busy = loading || simulating;
 
@@ -145,63 +174,75 @@ function MethodItem({
   };
 
   const handleEstimateGas = async () => {
-    if (!onEstimateGas) return;
+    if (!onEstimateGas || !validate() || valueError) return;
+    const currentRevision = revision.current;
     setEstimating(true);
     setGasEstimate(null);
     setGasError(null);
     try {
-      setGasEstimate(await onEstimateGas(params, buildOptions()));
+      const estimate = await onEstimateGas(params, buildOptions());
+      if (revision.current === currentRevision) setGasEstimate(estimate);
     } catch (error) {
-      setGasError(error instanceof Error ? error.message : "Gas 估算失败");
+      if (revision.current === currentRevision) setGasError(error instanceof Error ? error.message : "Gas 估算失败");
     } finally {
       setEstimating(false);
     }
   };
 
   const handleSimulate = async () => {
-    if (!onSimulate) return;
+    if (!onSimulate || !validate() || valueError) return;
+    const currentRevision = revision.current;
     setSimulating(true);
     setSimulation(null);
     setPreflightError(null);
     try {
-      setSimulation(await onSimulate(params, buildOptions()));
+      const result = await onSimulate(params, buildOptions());
+      if (revision.current === currentRevision) setSimulation(result);
     } catch (error) {
-      setSimulation({
-        ok: false,
-        message: error instanceof Error ? error.message : "预演失败",
-      });
+      if (revision.current === currentRevision) {
+        setSimulation({
+          ok: false,
+          message: error instanceof Error ? error.message : "预演失败",
+        });
+      }
     } finally {
       setSimulating(false);
     }
   };
 
-  /**
-   * Every write is preflighted with an `eth_call` first: a revert is shown
-   * before the wallet ever opens, and the user can still choose to force it.
-   */
   const handleSend = async () => {
-    if (!onSimulate) {
-      onExecute(params, buildOptions());
-      return;
-    }
+    const parsed = validate();
+    if (!parsed || valueError || !onSimulate) return;
+    const currentRevision = revision.current;
+    const raw = [...params];
+    const options = buildOptions();
     setPreflightError(null);
+    setFailedWrite(null);
+    setSimulation(null);
     setSimulating(true);
     try {
-      const sim = await onSimulate(params, buildOptions());
+      const account = await onCheckWallet();
+      const sim = await onSimulate(raw, options);
+      await onCheckWallet(account);
+      if (revision.current !== currentRevision) return;
+      const snapshot = { params: raw, options: { ...options, expectedAccount: account }, parsed };
       if (!sim.ok) {
         setPreflightError(sim.message);
+        setFailedWrite({ ...snapshot, error: sim.message });
         toast.error("预演失败，交易未发送");
         return;
       }
       setSimulation(sim);
-      onExecute(params, buildOptions());
+      setPendingWrite(snapshot);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "无法准备交易");
     } finally {
       setSimulating(false);
     }
   };
 
   const contentSpring = useSpring({
-    maxHeight: expanded ? 900 : 0,
+    maxHeight: expanded ? 10000 : 0,
     opacity: expanded ? 1 : 0,
     config: { tension: 280, friction: 24 },
     immediate: reducedMotion,
@@ -241,45 +282,24 @@ function MethodItem({
       <animated.div style={contentSpring} className="overflow-hidden">
         <div className="space-y-3 px-4 pb-4">
           {method.inputs.map((input, i) => (
-            <div key={i}>
-              <label htmlFor={`${method.name}-param-${i}`} className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1">
-                {input.name || `param${i}`}
-                <span className="ml-1 opacity-60">({input.type})</span>
-              </label>
-              <div className="terminal-prompt-wrap">
-                <input
-                  id={`${method.name}-param-${i}`}
-                  name={`${method.name}-param-${i}`}
-                  className="terminal-input font-mono text-[13px]"
-                  placeholder={`${input.type}…`}
-                  value={params[i]}
-                  onChange={(e) => {
-                    const p = [...params];
-                    p[i] = e.target.value;
-                    setParams(p);
-                  }}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </div>
-            </div>
+            <AbiParamInput key={i} index={i} input={input} id={`${method.selector}-param-${i}`} value={params[i]} showError={showParamErrors} onChange={(value) => { const next = [...params]; next[i] = value; setParams(next); invalidate(); }} />
           ))}
 
           {payable && (
             <div>
-              <label htmlFor={`${method.name}-value`} className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1">
+              <label htmlFor={`${method.selector}-value`} className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1">
                 Value
-                <span className="ml-1 opacity-60">(ETH)</span>
+                <span className="ml-1 opacity-60">({currency ? currency.name ? `${currency.name} / ${currency.symbol}` : currency.symbol : "币种未知"})</span>
               </label>
               <div className="terminal-prompt-wrap">
                 <input
-                  id={`${method.name}-value`}
-                  name={`${method.name}-value`}
+                  id={`${method.selector}-value`}
+                  name={`${method.selector}-value`}
                   className="terminal-input font-mono text-[13px]"
                   placeholder="0.0"
                   inputMode="decimal"
                   value={valueInput}
-                  onChange={(e) => setValueInput(e.target.value)}
+                  onChange={(e) => { setValueInput(e.target.value); invalidate(); }}
                   autoComplete="off"
                   spellCheck={false}
                   aria-invalid={Boolean(valueError)}
@@ -291,9 +311,9 @@ function MethodItem({
                 </p>
               ) : (
                 <p className="mt-1 text-[10px] text-[var(--terminal-text-secondary)]">
-                  payable 方法随交易附带的 ETH，留空即为 0
+                  payable 方法随交易附带的原生币，留空即为 0
                   {valueParse?.ok && valueParse.value > BigInt(0)
-                    ? ` · ${valueParse.value.toString()} wei`
+                    ? ` · ${valueParse.value.toString()} 最小单位`
                     : ""}
                 </p>
               )}
@@ -348,7 +368,7 @@ function MethodItem({
           ) : (
             <button
               className={`terminal-btn w-full ${isWrite ? "bg-[var(--terminal-orange)] text-white" : "terminal-btn-primary"}`}
-              onClick={() => onExecute(params, buildOptions())}
+              onClick={() => { if (validate()) onExecute(params, buildOptions()); }}
               disabled={loading}
             >
               {loading ? (
@@ -372,8 +392,8 @@ function MethodItem({
               </p>
               <button
                 type="button"
-                onClick={() => onExecute(params, buildOptions())}
-                disabled={Boolean(valueError)}
+                onClick={() => { if (failedWrite) setPendingWrite(failedWrite); }}
+                disabled={!failedWrite || Boolean(valueError)}
                 className="terminal-btn terminal-btn-secondary mt-2 w-full text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 忽略预演，仍然发送
@@ -469,12 +489,35 @@ function MethodItem({
           )}
         </div>
       </animated.div>
+      {pendingWrite && (
+        <Dialog open onOpenChange={(open) => { if (!open) setPendingWrite(null); }}>
+          <DialogContent className="max-h-[85vh] overflow-y-auto" showCloseButton={false}>
+            <DialogTitle>确认写入交易</DialogTitle>
+            <DialogDescription>请核对交易内容，确认后将在钱包中请求签名。</DialogDescription>
+            <dl className="space-y-2 text-[12px]">
+              {[
+                ["网络", `${getNativeChain(contract.chainId)?.name ?? "未知网络"} (Chain ID: ${contract.chainId})`],
+                ["账户", pendingWrite.options.expectedAccount ?? ""],
+                ["合约地址", contract.address],
+                ["方法", method.format("sighash")],
+                ["附带金额", formatNativeAmount(BigInt(pendingWrite.options.valueWei ?? "0"), contract.chainId)],
+              ].map(([label, value]) => <div key={label}><dt className="text-[var(--terminal-text-secondary)]">{label}</dt><dd className="break-all font-mono">{value}</dd></div>)}
+              <div><dt className="text-[var(--terminal-text-secondary)]">参数</dt><dd className="break-all font-mono whitespace-pre-wrap">{method.inputs.length ? method.inputs.map((input, index) => `${input.name || `param${index}`} (${input.format("sighash")}): ${JSON.stringify(pendingWrite.parsed[index], (_, value) => typeof value === "bigint" ? value.toString() : value)}`).join("\n") : "无"}</dd></div>
+            </dl>
+            {pendingWrite.error && <p className="break-all text-[12px] text-[var(--terminal-red)]" role="alert">预演失败：{pendingWrite.error}</p>}
+            <div className="flex gap-2">
+              <button type="button" className="terminal-btn terminal-btn-secondary flex-1" onClick={() => setPendingWrite(null)}>取消</button>
+              <button type="button" className="terminal-btn flex-1 bg-[var(--terminal-orange)] text-white" onClick={() => { const snapshot = pendingWrite; setPendingWrite(null); onExecute(snapshot.params, snapshot.options); }}>确认并打开钱包</button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
 
 export default function ContractInteractView({ contract, onClose, onHistoryUpdate }: ContractInteractViewProps) {
-  const { chainId } = useAccount();
+  const { chainId, address } = useAccount();
   const provider = useEthersProvider();
   const [activeTab, setActiveTab] = useState<"read" | "write">("read");
   const [results, setResults] = useState<Record<string, string>>({});
@@ -515,6 +558,16 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   const getProvider = () => {
     if (!provider) throw new Error("请先连接钱包");
     return provider;
+  };
+
+  const checkWriteWallet = async (expectedAccount?: string) => {
+    const wallet = getProvider();
+    const actualChain = Number(await wallet.send("eth_chainId", []));
+    const accounts = await wallet.send("eth_accounts", []) as string[];
+    const account = accounts.find((entry) => entry.toLowerCase() === address?.toLowerCase());
+    if (actualChain !== contract.chainId || chainId !== contract.chainId) throw new Error(`钱包网络与合约网络不一致，请切换到 Chain ID ${contract.chainId}`);
+    if (!account || !address || account.toLowerCase() !== address.toLowerCase() || (expectedAccount && account.toLowerCase() !== expectedAccount.toLowerCase())) throw new Error("钱包账户已变化，请重新核对交易");
+    return account;
   };
 
   /**
@@ -622,6 +675,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     params: string[],
     options: ExecuteOptions
   ): Promise<GasEstimate> => {
+    await checkWriteWallet();
     const provider = getProvider();
     const runner = await getReadRunner(provider);
     const c = new ethers.Contract(contract.address, contract.abi, runner);
@@ -631,12 +685,11 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
       buildOverrides(options)
     );
     const feeData = await provider.getFeeData();
-    const gasPrice = feeData.gasPrice ?? feeData.maxFeePerGas ?? BigInt(0);
-    const totalCostWei = estimatedGas * gasPrice;
+    const gasPrice = feeData.gasPrice ?? feeData.maxFeePerGas;
     return {
-      gas: Number(estimatedGas).toLocaleString(),
-      gasPrice: `${(Number(gasPrice) / 1e9).toFixed(2)} GWei`,
-      totalCost: `${ethers.formatEther(totalCostWei)} ETH`,
+      gas: estimatedGas.toLocaleString(),
+      gasPrice: gasPrice === null ? "未知" : `${ethers.formatUnits(gasPrice, 9)} GWei`,
+      totalCost: gasPrice === null ? "未知" : formatNativeAmount(estimatedGas * gasPrice, contract.chainId),
     };
   };
 
@@ -647,6 +700,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     options: ExecuteOptions
   ): Promise<SimulationResult> => {
     try {
+      await checkWriteWallet();
       const provider = getProvider();
       const signer = await provider.getSigner();
       const from = await signer.getAddress();
@@ -683,7 +737,10 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     let transactionChainId = chainId ?? contract.chainId;
     try {
       const provider = getProvider();
-      const signer = await provider.getSigner();
+      if (!options.expectedAccount) throw new Error("请先确认交易");
+      await checkWriteWallet(options.expectedAccount);
+      const signer = await provider.getSigner(options.expectedAccount);
+      await checkWriteWallet(options.expectedAccount);
       const c = new ethers.Contract(contract.address, contract.abi, signer);
       const parsedParams = parseMethodParams(method, params);
       const tx = await c[method.format("sighash")](
@@ -859,8 +916,10 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
               ) : (
                 currentMethods.map(method => (
                   <MethodItem
-                    key={getMethodKey(method)}
+                    key={`${getMethodKey(method)}-${contract.address}-${chainId}-${address}`}
                     method={method}
+                    contract={contract}
+                    onCheckWallet={checkWriteWallet}
                     isWrite={activeTab === "write"}
                     onExecute={(params, options) =>
                       activeTab === "write"

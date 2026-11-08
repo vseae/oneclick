@@ -41,8 +41,8 @@ The network-scoped history of read and write operations performed through intera
 _Avoid_: Main list, activity feed
 
 **Value**:
-The ETH amount attached to a payable write, entered in ETH and sent as wei.
-_Avoid_: Amount (when referring to the ETH attached to a transaction)
+The amount of the network's native currency attached to a payable write.
+_Avoid_: Amount (when referring to the native currency attached to a transaction)
 
 **Simulation**:
 An `eth_call` executed as the connected account before a write is sent, shown in the interaction panel as 预演.
