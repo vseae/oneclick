@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { ethers } from "ethers";
+import type { Abi, Hex } from "viem";
+import { normalizeAbi } from "@/lib/abi";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
@@ -13,16 +14,16 @@ import {
   FileSearch,
   ScrollText,
 } from "lucide-react";
-import { formatEventArgument, formatEventParamType } from "@/lib/event-log";
+import { decodeRawLogWithAbi } from "@/lib/event-log";
 import { listContractsByChainId } from "@/lib/local-store";
-import { useEthersProvider } from "@/lib/use-ethers-provider";
+import { useWalletClients } from "@/lib/use-wallet-clients";
 import { copyToClipboard, shortenHash, SummaryRow } from "./log-shared";
 
 interface SavedContract {
   id: number;
   name: string;
   address: string;
-  abi: ethers.InterfaceAbi;
+  abi: Abi;
   chainId: number;
 }
 
@@ -173,7 +174,7 @@ function LogItem({ log }: { log: ParsedLog }) {
 
 export default function ReceiptLogDecoder() {
   const { chainId } = useAccount();
-  const provider = useEthersProvider();
+  const { publicClient: provider } = useWalletClients();
   const [mode, setMode] = useState<"saved" | "manual">("saved");
   const [contracts, setContracts] = useState<SavedContract[]>([]);
   const [selectedContractId, setSelectedContractId] = useState("");
@@ -241,9 +242,9 @@ export default function ReceiptLogDecoder() {
       return;
     }
 
-    let iface: ethers.Interface;
+    let iface: Abi;
     try {
-      iface = new ethers.Interface(currentAbi);
+      iface = normalizeAbi(currentAbi);
     } catch {
       toast.error("[INVALID_INPUT] ABI 格式无效，请检查 JSON 格式");
       return;
@@ -254,8 +255,8 @@ export default function ReceiptLogDecoder() {
 
     try {
       const [tx, receipt] = await Promise.all([
-        provider.getTransaction(trimmedHash),
-        provider.getTransactionReceipt(trimmedHash),
+        provider.getTransaction({ hash: trimmedHash as Hex }),
+        provider.getTransactionReceipt({ hash: trimmedHash as Hex }),
       ]);
 
       if (!tx || !receipt) {
@@ -268,29 +269,15 @@ export default function ReceiptLogDecoder() {
 
       for (const log of receipt.logs) {
         try {
-          const parsed = iface.parseLog({ topics: [...log.topics], data: log.data });
-          if (!parsed) {
-            unmatchedCount += 1;
-            continue;
-          }
-
+          const parsed = decodeRawLogWithAbi(iface, { topics: [...log.topics], data: log.data });
           parsedLogs.push({
             name: parsed.name,
             signature: parsed.signature,
             address: log.address,
             transactionHash: log.transactionHash,
-            blockNumber: log.blockNumber,
-            logIndex: log.index,
-            params: parsed.fragment.inputs.map((input, index) => {
-              const formatted = formatEventArgument(input, parsed.args[index]);
-              return {
-                name: input.name || `param${index}`,
-                type: formatEventParamType(input),
-                indexed: input.indexed ?? null,
-                hashed: formatted.hashed,
-                value: formatted.value,
-              };
-            }),
+            blockNumber: Number(log.blockNumber),
+            logIndex: log.logIndex,
+            params: parsed.params,
           });
         } catch {
           unmatchedCount += 1;
@@ -301,8 +288,8 @@ export default function ReceiptLogDecoder() {
       setSummary({
         from: tx.from,
         to: tx.to ?? "Contract Creation",
-        blockNumber: receipt.blockNumber,
-        status: receipt.status === 1 ? "Success" : "Failed",
+        blockNumber: Number(receipt.blockNumber),
+        status: receipt.status === "success" ? "Success" : "Failed",
         decodedCount: parsedLogs.length,
         unmatchedCount,
       });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ethers } from "ethers";
+import { abiSignature, normalizeAbi } from "@/lib/abi";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -31,12 +31,9 @@ export default function SelectorDialog({ contract, onClose }: SelectorDialogProp
     }
   }, [contract.abi]);
 
-  const iface = useMemo(() => {
-    try {
-      return new ethers.Interface(contract.abi);
-    } catch {
-      return null;
-    }
+  const functions = useMemo(() => {
+    try { return normalizeAbi(contract.abi).filter((item) => item.type === "function"); }
+    catch { return []; }
   }, [contract.abi]);
 
   const [copied, setCopied] = useState<string | null>(null);
@@ -55,7 +52,7 @@ export default function SelectorDialog({ contract, onClose }: SelectorDialogProp
   const typeLabel = (item: SelectorItem) => {
     if (item.type === "event") return "event";
     if (item.type === "error") return "error";
-    const fn = iface?.getFunction(item.signature);
+    const fn = functions.find((fn) => abiSignature(fn) === item.signature);
     return fn && isReadMethod(fn) ? "read" : "write";
   };
 

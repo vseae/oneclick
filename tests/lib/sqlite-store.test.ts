@@ -38,7 +38,7 @@ describe("sqlite-store contracts", () => {
       name: "TokenA v2",
       address: TOKEN_A,
       chainId: 1,
-      abi: [{ type: "function", name: "symbol", inputs: [], outputs: [] }],
+      abi: [{ type: "function", name: "symbol", inputs: [], outputs: [], stateMutability: "view" }],
     });
 
     expect(created.updated).toBe(false);

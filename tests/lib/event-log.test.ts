@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { Interface, id } from "ethers";
+import { encodeAbiParameters, encodeEventTopics, keccak256, parseAbi, toBytes, type Abi, type AbiEvent } from "viem";
+const id = (value: string) => keccak256(toBytes(value));
+function makeLog(abi: Abi, values: readonly unknown[]) {
+  const event = abi.find((item): item is AbiEvent => item.type === "event")!;
+  const indexed = event.inputs.flatMap((input, index) => input.indexed ? [values[index]] : []);
+  const nonIndexed = event.inputs.flatMap((input, index) => input.indexed ? [] : [values[index]]);
+  return { topics: [...encodeEventTopics({ abi: [event], eventName: event.name, args: indexed as never })] as string[], data: encodeAbiParameters(event.inputs.filter((input) => !input.indexed), nonIndexed) };
+}
 import {
   decodeRawLogWithAbi,
   decodeRawLogWithLocalAbis,
@@ -10,16 +17,12 @@ import {
   parseEventSignature,
 } from "../../lib/event-log";
 
-const transferAbi = [
-  "event Transfer(address indexed from, address indexed to, uint256 value)",
-];
-const transferIface = new Interface(transferAbi);
-const transferFragment = transferIface.getEvent("Transfer")!;
+const transferAbi = parseAbi(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
 
 const FROM = "0x1111111111111111111111111111111111111111";
 const TO = "0x2222222222222222222222222222222222222222";
 
-const transferLog = transferIface.encodeEventLog(transferFragment, [FROM, TO, BigInt(1000)]);
+const transferLog = makeLog(transferAbi, [FROM, TO, BigInt(1000)]);
 
 describe("raw log input normalization", () => {
   it("trims fields and normalizes empty data to 0x", () => {
@@ -127,9 +130,8 @@ describe("decodeRawLogWithAbi", () => {
   });
 
   it("exposes indexed dynamic values as their topic hash", () => {
-    const abi = ["event Tagged(string indexed label, address indexed who)"];
-    const iface = new Interface(abi);
-    const log = iface.encodeEventLog(iface.getEvent("Tagged")!, [FROM, FROM]);
+    const abi = parseAbi(["event Tagged(string indexed label, address indexed who)"]);
+    const log = makeLog(abi, [FROM, FROM]);
 
     const decoded = decodeRawLogWithAbi(abi, log);
 
@@ -149,9 +151,8 @@ describe("decodeRawLogWithAbi", () => {
   });
 
   it("uses canonical tuple types", () => {
-    const abi = ["event Complex((address,uint256) pair)"];
-    const iface = new Interface(abi);
-    const log = iface.encodeEventLog(iface.getEvent("Complex")!, [[FROM, BigInt(7)]]);
+    const abi = parseAbi(["event Complex((address,uint256) pair)"]);
+    const log = makeLog(abi, [[FROM, BigInt(7)]]);
 
     const decoded = decodeRawLogWithAbi(abi, log);
 
@@ -161,7 +162,7 @@ describe("decodeRawLogWithAbi", () => {
 
   it("rejects logs whose topic0 is unknown to the ABI", () => {
     expect(() =>
-      decodeRawLogWithAbi(["event Mint(address indexed to, uint256 amount)"], transferLog)
+      decodeRawLogWithAbi(parseAbi(["event Mint(address indexed to, uint256 amount)"]), transferLog)
     ).toThrow("Topic0");
   });
 
@@ -214,9 +215,8 @@ describe("decodeRawLogWithSignature", () => {
   });
 
   it("handles hashed indexed and non-indexed dynamic parameters", () => {
-    const abi = ["event Tagged(string indexed label, address who, bytes data)"];
-    const iface = new Interface(abi);
-    const log = iface.encodeEventLog(iface.getEvent("Tagged")!, ["hello", TO, "0xdeadbeef"]);
+    const abi = parseAbi(["event Tagged(string indexed label, address who, bytes data)"]);
+    const log = makeLog(abi, ["hello", TO, "0xdeadbeef"]);
 
     const decoded = decodeRawLogWithSignature("Tagged(string,address,bytes)", log);
 
@@ -256,9 +256,8 @@ describe("decodeRawLogWithSignature", () => {
   });
 
   it("flags ambiguity when several indexed layouts fit the same log", () => {
-    const abi = ["event Deposit(uint256 amount, address indexed depositor)"];
-    const iface = new Interface(abi);
-    const log = iface.encodeEventLog(iface.getEvent("Deposit")!, [BigInt(12345), TO]);
+    const abi = parseAbi(["event Deposit(uint256 amount, address indexed depositor)"]);
+    const log = makeLog(abi, [BigInt(12345), TO]);
 
     const decoded = decodeRawLogWithSignature("Deposit(uint256,address)", log);
 
@@ -283,11 +282,10 @@ describe("decodeRawLogWithSignature", () => {
   });
 
   it("decodes non-indexed-first layouts like Uniswap V3 Mint but flags them", () => {
-    const abi = [
+    const abi = parseAbi([
       "event Mint(address sender, address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)",
-    ];
-    const iface = new Interface(abi);
-    const log = iface.encodeEventLog(iface.getEvent("Mint")!, [
+    ]);
+    const log = makeLog(abi, [
       FROM,
       TO,
       BigInt(-100),
@@ -314,7 +312,7 @@ describe("decodeRawLogWithLocalAbis", () => {
         {
           name: "TokenA",
           address: FROM,
-          abi: ["event Mint(address indexed to, uint256 amount)"],
+          abi: parseAbi(["event Mint(address indexed to, uint256 amount)"]),
         },
         {
           name: "TokenB",
@@ -348,7 +346,7 @@ describe("decodeRawLogWithLocalAbis", () => {
   it("returns no results when no saved ABI matches", () => {
     expect(
       decodeRawLogWithLocalAbis(
-        [{ name: "TokenA", abi: ["event Mint(address indexed to, uint256 amount)"] }],
+        [{ name: "TokenA", abi: parseAbi(["event Mint(address indexed to, uint256 amount)"]) }],
         transferLog
       )
     ).toEqual([]);
@@ -359,7 +357,7 @@ describe("decodeRawLogWithLocalAbis", () => {
       [
         {
           name: "WrongShape",
-          abi: ["event Transfer(address indexed from, uint256 indexed value, address indexed to)"],
+          abi: parseAbi(["event Transfer(address indexed from, uint256 indexed value, address indexed to)"]),
         },
       ],
       transferLog
@@ -371,12 +369,9 @@ describe("decodeRawLogWithLocalAbis", () => {
 
 describe("formatEventArgument", () => {
   it("keeps the hash for indexed reference types", () => {
-    const abi = ["event Tagged(string indexed label)"];
-    const iface = new Interface(abi);
-    const log = iface.encodeEventLog(iface.getEvent("Tagged")!, ["hello"]);
-    const parsed = iface.parseLog(log)!;
-
-    expect(formatEventArgument(iface.getEvent("Tagged")!.inputs[0], parsed.args[0])).toEqual({
+    const abi = parseAbi(["event Tagged(string indexed label)"]);
+    const log = makeLog(abi, ["hello"]);
+    expect(formatEventArgument((abi[0] as AbiEvent).inputs[0], log.topics[1])).toEqual({
       value: log.topics[1],
       hashed: true,
     });

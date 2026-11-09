@@ -1,6 +1,6 @@
 "use client";
 
-import type { InterfaceAbi } from "ethers";
+import type { Abi } from "viem";
 import type { ContractDirectoryRecord, MoveContractInput } from "@/lib/types";
 
 export interface LocalContractRecord {
@@ -8,7 +8,7 @@ export interface LocalContractRecord {
   name: string;
   address: string;
   chainId: number;
-  abi: InterfaceAbi;
+  abi: Abi;
   createdAt: string;
   addressChainKey: string;
   directoryId: number | null;
@@ -35,14 +35,14 @@ export interface UpsertContractInput {
   name: string;
   address: string;
   chainId: number;
-  abi: InterfaceAbi;
+  abi: Abi;
 }
 
 export interface UpdateContractInput {
   name?: string;
   address?: string;
   chainId?: number;
-  abi?: InterfaceAbi;
+  abi?: Abi;
 }
 
 export interface AddHistoryInput {
@@ -70,7 +70,7 @@ export interface LocalDataSnapshot {
     name: string;
     address: string;
     chainId: number;
-    abi: InterfaceAbi;
+    abi: Abi;
     createdAt?: string;
     directoryId?: number | null;
   }>;

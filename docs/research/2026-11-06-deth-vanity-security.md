@@ -8,7 +8,7 @@
 
 程序[筛选并返回](https://github.com/dethcrypto/dethtools/blob/15df537882c69bcb04b223b88e0763a4afaf9d2a/src/lib/vanity-address/vanity-address.ts#L101-L115) `address(h)` 和原始私钥 `k`；[页面展示这两者](https://github.com/dethcrypto/dethtools/blob/15df537882c69bcb04b223b88e0763a4afaf9d2a/pages/vanity-address-generator/index.page.tsx#L257-L270)。因此通常直接导入显示的 `k` 得到另一个地址，无法直接控制显示的靓号地址。`h` 本身是该派生靓号地址对应的私钥，知道原始 `k` 可离线重新计算 `h`，但不要将真实私钥发送给任何人或在线工具。由于 `h` 由 `k` 的公钥直接计算，只要该公钥泄露，任何人都能算出靓号的私钥；因此派生出的靓号密钥也不适合长期使用。
 
-独立确定性复核使用公开测试私钥 `0x…01`，用本地 ethers 分别计算标准钱包地址及上述双重派生地址：标准地址为 `0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf`，源码算法结果为 `0xBA3B0571b6EBB69b7563577efB1b8832b2905179`。这不是用户的钱包，也没有调用线上服务。两者不同。仓库[现有测试](https://github.com/dethcrypto/dethtools/blob/15df537882c69bcb04b223b88e0763a4afaf9d2a/src/lib/vanity-address/vanity-address.test.ts#L51-L80)只检查长度和结果对象形状，没有验证私钥导出的地址等于输出地址。
+独立确定性复核使用公开测试私钥 `0x…01`，用本地工具分别计算标准钱包地址及上述双重派生地址：标准地址为 `0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf`，源码算法结果为 `0xBA3B0571b6EBB69b7563577efB1b8832b2905179`。这不是用户的钱包，也没有调用线上服务。两者不同。仓库[现有测试](https://github.com/dethcrypto/dethtools/blob/15df537882c69bcb04b223b88e0763a4afaf9d2a/src/lib/vanity-address/vanity-address.test.ts#L51-L80)只检查长度和结果对象形状，没有验证私钥导出的地址等于输出地址。
 
 当前官网下发的[页面 chunk](https://tools.deth.net/_next/static/chunks/pages/vanity-address-generator-0d0583036616e363.js)和 [Worker chunk](https://tools.deth.net/_next/static/chunks/914.65d09fb88e519584.js)也包含相同的计算路径：对公钥做 Keccak 后传入 `privateToAddress`，同时返回原始私钥。两者是压缩构建代码的静态分析，未运行在线生成来验证输出，也不能证明发布包其他部分完全相同。
 

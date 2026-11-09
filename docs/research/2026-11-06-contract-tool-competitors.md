@@ -30,7 +30,7 @@
 
 - 已有：合约目录及搜索、批量导入和备份、读写及方法搜索、Gas 估算、写入前 `eth_call` 预演、操作历史、两种批量读取模式，以及 12 个计算和 ABI 数据工具。参考 [`app/page.tsx`](../../app/page.tsx)、[`components/interact/ContractInteractView.tsx`](../../components/interact/ContractInteractView.tsx)、[`components/layout/ToolPanel.tsx`](../../components/layout/ToolPanel.tsx)、[`components/BatchReadTool.tsx`](../../components/BatchReadTool.tsx)。
 - 地址导入：当前添加表单要求名称、地址和 ABI JSON；建议输入链及地址后获取已验证 ABI，失败时保留手动输入，显示来源、验证状态和代理实现地址。代理检测及其边界需要单独设计。参考 [`ContractForm.tsx`](../../components/contracts/ContractForm.tsx)。
-- 只读入口：当前主交互面板依赖钱包连接，交易哈希与回执查询也依赖钱包 provider。建议独立选择网络及公共/自定义 RPC，允许无钱包只读，写入时再连接钱包。参考 [`app/page.tsx`](../../app/page.tsx)、[`use-ethers-provider.ts`](../../lib/use-ethers-provider.ts)。
+- 只读入口：当前主交互面板依赖钱包连接，交易哈希与回执查询也依赖钱包 provider。建议独立选择网络及公共/自定义 RPC，允许无钱包只读，写入时再连接钱包。参考 [`app/page.tsx`](../../app/page.tsx)、[`use-wallet-clients.ts`](../../lib/use-wallet-clients.ts)。
 - 参数可靠性：[`parseMethodParam`](../../lib/contract-utils.ts)将空整数转换为 0，将除了 `true` 以外的布尔文本转换为 false，定长数组也未按动态数组分支处理；建议类型化输入、必填校验及清晰错误。尤其在写入前，应展示完整网络、地址、方法、参数和原生币价值供用户核对。
 - 批量读取：[`BatchReadTool.tsx`](../../components/BatchReadTool.tsx)通过 Multicall3 调用目标合约，目标看到的 `msg.sender` 是 Multicall3，而非连接账户；失败时单独重放获取错误使用不同调用上下文，可能导致诊断不一致。应提示差异并提供按指定账户直接读取的选项。该工具还先检查 `window.ethereum`，即使已通过非注入钱包连接也可能被拦截。
 - 网络和原生币：钱包配置固定十条网络；表单可输入自定义 chain ID 不等于对应 RPC 和钱包网络已经可用。可根据目标用户添加网络或完整的自定义 RPC。交互和历史中将原生币硬编码为 ETH，在 Avalanche 等链会误导，应使用网络符号与精度。

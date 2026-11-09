@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ethers } from "ethers";
+import { keccak256, toBytes } from "viem";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
 import { Hash, Copy } from "lucide-react";
@@ -26,7 +26,7 @@ export default function Keccak256Tool() {
   const handleHash = () => {
     if (!input) { toast.error("[INPUT_REQUIRED] 请输入要哈希的字符串"); return; }
     try {
-      setHash(ethers.keccak256(ethers.toUtf8Bytes(input)));
+      setHash(keccak256(toBytes(input)));
       toast.success("[HASH_READY] 哈希生成成功");
     } catch { toast.error("[HASH_FAILED] 生成哈希失败"); }
   };

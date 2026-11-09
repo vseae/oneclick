@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { InterfaceAbi } from "ethers";
+import type { Abi } from "viem";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -42,7 +42,7 @@ export default function EditContractDialog({ contract, onClose, onSaved }: EditC
 
     const nameResult = contractNameSchema.safeParse(name);
     const addressResult = contractAddressSchema.safeParse(address);
-    let abi: InterfaceAbi | null = null;
+    let abi: Abi | null = null;
     let abiError = "";
 
     try {

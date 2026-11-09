@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ethers } from "ethers";
+import { decodeFunctionData, type Abi, type AbiFunction, type Hex } from "viem";
+import { abiSelector, normalizeAbi } from "@/lib/abi";
+import { decodeRawLogWithAbi } from "@/lib/event-log";
 import { formatNativeAmount } from "@/lib/native-currency";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
@@ -10,7 +12,7 @@ import { FileSearch, Database, ClipboardPaste, ArrowRightLeft, ScrollText } from
 import ToolHeader from "@/components/tools/ToolHeader";
 import { formatResult } from "@/lib/contract-utils";
 import { listContractsByChainId } from "@/lib/local-store";
-import { useEthersProvider } from "@/lib/use-ethers-provider";
+import { useWalletClients } from "@/lib/use-wallet-clients";
 
 type Mode = "calldata" | "txhash";
 type AbiSource = "saved" | "manual";
@@ -20,7 +22,7 @@ interface SavedContract {
   name: string;
   address: string;
   chainId: number;
-  abi: ethers.InterfaceAbi;
+  abi: Abi;
 }
 
 interface DecodedParam {
@@ -110,7 +112,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 export default function TxDecoderTool() {
   const { chainId } = useAccount();
-  const provider = useEthersProvider();
+  const { publicClient: provider } = useWalletClients();
   const [mode, setMode] = useState<Mode>("calldata");
   const [abiSource, setAbiSource] = useState<AbiSource>("saved");
   const [calldata, setCalldata] = useState("");
@@ -153,7 +155,7 @@ export default function TxDecoderTool() {
     }
   }, [abiSource, chainId]);
 
-  const getAbi = useCallback((): ethers.InterfaceAbi | null => {
+  const getAbi = useCallback((): Abi | null => {
     if (abiSource === "saved") {
       const contract = savedContracts.find((c) => c.id === selectedContractId);
       if (!contract) {
@@ -176,11 +178,11 @@ export default function TxDecoderTool() {
   }, [abiSource, savedContracts, selectedContractId, manualAbi]);
 
   const decodeParams = (
-    fragment: ethers.FunctionFragment,
-    decoded: ethers.Result
+    fragment: AbiFunction,
+    decoded: readonly unknown[]
   ): DecodedParam[] => {
     return fragment.inputs.map((input, i) => ({
-      name: input.name,
+      name: input.name ?? "",
       type: input.type,
       value: formatResult(decoded[i]),
     }));
@@ -196,20 +198,20 @@ export default function TxDecoderTool() {
     if (!abi) return;
 
     try {
-      const iface = new ethers.Interface(abi);
+      const iface = normalizeAbi(abi);
       const selector = trimmed.slice(0, 10);
-      const fragment = iface.getFunction(selector);
+      const fragment = iface.find((item): item is AbiFunction => item.type === "function" && abiSelector(item).toLowerCase() === selector.toLowerCase());
 
       if (!fragment) {
         toast.error("[DECODE_MISS] ABI 中无匹配函数");
         return;
       }
 
-      const decoded = iface.decodeFunctionData(fragment, trimmed);
+      const decoded = decodeFunctionData({ abi: [fragment], data: trimmed as Hex }).args ?? [];
       const params = decodeParams(fragment, decoded);
       setDecodedFunction({
         functionName: fragment.name,
-        selector: fragment.selector,
+        selector: abiSelector(fragment),
         params,
       });
       setTxInfo(null);
@@ -237,9 +239,9 @@ export default function TxDecoderTool() {
     setLoading(true);
     try {
       const [tx, receipt, network] = await Promise.all([
-        provider.getTransaction(trimmed),
-        provider.getTransactionReceipt(trimmed),
-        provider.getNetwork(),
+        provider.getTransaction({ hash: trimmed as Hex }),
+        provider.getTransactionReceipt({ hash: trimmed as Hex }).catch(() => null),
+        provider.getChainId(),
       ]);
 
       if (!tx) {
@@ -252,23 +254,23 @@ export default function TxDecoderTool() {
       setTxInfo({
         from: tx.from,
         to: tx.to || "合约创建",
-        value: formatNativeAmount(tx.value, Number(network.chainId)),
+        value: formatNativeAmount(tx.value, network),
         gasUsed: receipt ? receipt.gasUsed.toString() : "N/A",
-        blockNumber: tx.blockNumber || 0,
+        blockNumber: Number(tx.blockNumber ?? 0),
       });
 
       // 解码函数调用
-      const iface = new ethers.Interface(abi);
+      const iface = normalizeAbi(abi);
       try {
-        const selector = tx.data.slice(0, 10);
-        const fragment = iface.getFunction(selector);
+        const selector = tx.input.slice(0, 10);
+        const fragment = iface.find((item): item is AbiFunction => item.type === "function" && abiSelector(item).toLowerCase() === selector.toLowerCase());
 
         if (fragment) {
-          const decoded = iface.decodeFunctionData(fragment, tx.data);
+          const decoded = decodeFunctionData({ abi: [fragment], data: tx.input }).args ?? [];
           const params = decodeParams(fragment, decoded);
           setDecodedFunction({
             functionName: fragment.name,
-            selector: fragment.selector,
+            selector: abiSelector(fragment),
             params,
           });
         } else {
@@ -280,24 +282,12 @@ export default function TxDecoderTool() {
 
       // 解码事件日志
       if (receipt) {
-        const parsedLogs = receipt.logs
-          .map((log) => {
-            try {
-              return iface.parseLog({ topics: [...log.topics], data: log.data });
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean) as ethers.LogDescription[];
-
-        const events: DecodedEvent[] = parsedLogs.map((parsed) => ({
-          name: parsed.name,
-          params: parsed.fragment.inputs.map((input, i) => ({
-            name: input.name,
-            type: input.type,
-            value: formatResult(parsed.args[i]),
-          })),
-        }));
+        const events: DecodedEvent[] = receipt.logs.flatMap((log) => {
+          try {
+            const parsed = decodeRawLogWithAbi(iface, { topics: [...log.topics], data: log.data });
+            return [{ name: parsed.name, params: parsed.params }];
+          } catch { return []; }
+        });
         setDecodedEvents(events);
       }
 

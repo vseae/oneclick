@@ -1,5 +1,5 @@
-import { AbiCoder, id, Indexed, Interface, ParamType } from "ethers";
-import type { EventFragment, InterfaceAbi, LogDescription } from "ethers";
+import { decodeAbiParameters, decodeEventLog, encodeAbiParameters, keccak256, toBytes, type Abi, type AbiEvent, type AbiParameter, type Hex } from "viem";
+import { abiSelector, abiSignature, normalizeAbi, parameterType, parseParameter } from "./abi";
 import { formatResult } from "./contract-utils";
 
 /** Where a decoded raw event came from. */
@@ -16,7 +16,7 @@ export interface RawEventLog {
 export interface RawEventAbiSource {
   name: string;
   address?: string;
-  abi: InterfaceAbi;
+  abi: Abi;
 }
 
 export interface DecodedEventParam {
@@ -153,7 +153,7 @@ function normalizeSignatureParamType(raw: string, signature: string): string {
   const typeOnly = rawType.replace(/\bbyte\b/g, "bytes1").replace(/\bfunction\b/g, "bytes24");
 
   try {
-    return ParamType.from(typeOnly).format("sighash");
+    return parameterType(parseParameter(typeOnly));
   } catch {
     throw new Error(`无法解析事件参数类型 ${raw} (${signature})`);
   }
@@ -186,218 +186,79 @@ export function isHashedEventParamType(type: string): boolean {
   return trimmed.endsWith("]") || trimmed.startsWith("(");
 }
 
-function isHashedParam(input: ParamType): boolean {
-  if (input.baseType === "array" || input.baseType === "tuple") {
-    return true;
-  }
-  return input.type === "string" || input.type === "bytes";
-}
-
-function getIndexedHash(value: unknown): string | null {
-  if (value instanceof Indexed) {
-    return value.hash;
-  }
-  if (
-    value !== null &&
-    typeof value === "object" &&
-    "hash" in value &&
-    typeof (value as { hash?: unknown }).hash === "string"
-  ) {
-    return (value as { hash: string }).hash;
-  }
-  return null;
-}
-
 /** Canonical display type for a decoded ABI parameter (tuples included). */
-export function formatEventParamType(input: ParamType): string {
-  try {
-    return input.format("sighash");
-  } catch {
-    return input.type;
-  }
+export function formatEventParamType(input: AbiParameter): string {
+  return parameterType(input);
 }
 
-/** Format one decoded argument, keeping indexed reference-type hashes readable. */
 export function formatEventArgument(
-  input: ParamType,
+  input: AbiParameter & { indexed?: boolean },
   value: unknown
 ): { value: string; hashed: boolean } {
-  if (input.indexed && isHashedParam(input)) {
-    const hash = getIndexedHash(value);
-    if (hash) {
-      return { value: hash, hashed: true };
-    }
+  if (input.indexed && isHashedEventParamType(input.type)) {
+    const hash = typeof value === "string" ? value : (value as { hash?: string } | null)?.hash;
+    if (hash) return { value: hash, hashed: true };
   }
   return { value: formatResult(value), hashed: false };
 }
 
-function buildDecodedEvent(
-  parsed: LogDescription,
-  source: RawEventDecodeSource
-): DecodedRawEvent {
-  const params = parsed.fragment.inputs.map((input, index) => {
-    const formatted = formatEventArgument(input, parsed.args[index]);
-    return {
-      name: input.name || `param${index}`,
-      type: formatEventParamType(input),
-      indexed: Boolean(input.indexed),
-      hashed: formatted.hashed,
-      value: formatted.value,
-    };
-  });
+function assertLogMatchesEvent(fragment: AbiEvent, log: RawEventLog): void {
+  const expectedTopics = 1 + fragment.inputs.filter((input) => input.indexed).length;
+  if (log.topics.length !== expectedTopics) {
+    throw new Error(`Topic 数量与事件定义不匹配：该事件需要 ${expectedTopics} 个 Topic，实际收到 ${log.topics.length} 个`);
+  }
+  const params = fragment.inputs.filter((input) => !input.indexed);
+  if (!params.length) {
+    if (log.data !== "" && log.data !== "0x") throw new Error("DATA 与事件定义不匹配：该事件没有非 indexed 参数");
+    return;
+  }
+  let encoded: string;
+  try {
+    const decoded = decodeAbiParameters(params, log.data as Hex);
+    encoded = encodeAbiParameters(params, decoded);
+  } catch {
+    throw new Error("DATA 无法按事件定义解码");
+  }
+  if (encoded.toLowerCase() !== log.data.toLowerCase()) throw new Error("DATA 与事件定义不匹配：存在多余或缺失的编码数据");
+}
 
+export function decodeRawLogWithAbi(abi: Abi, log: RawEventLog, source: RawEventDecodeSource = "abi"): DecodedRawEvent {
+  const topic0 = log.topics[0];
+  if (!topic0) throw new Error("日志缺少 TOPIC_0，无法匹配事件");
+  const fragment = normalizeAbi(abi).find((item): item is AbiEvent => item.type === "event" && abiSelector(item).toLowerCase() === topic0.toLowerCase());
+  if (!fragment) throw new Error("该 ABI 中没有事件与日志的 Topic0 匹配");
+  assertLogMatchesEvent(fragment, log);
+  let args: readonly unknown[] | Record<string, unknown>;
+  try {
+    args = decodeEventLog({ abi: [fragment], topics: log.topics as [Hex, ...Hex[]], data: log.data as Hex }).args as readonly unknown[] | Record<string, unknown>;
+  } catch {
+    throw new Error("日志数据无法按 ABI 中的事件定义解码，请检查 Topic / DATA 是否属于该合约");
+  }
+  const params = fragment.inputs.map((input, index) => {
+    const value = Array.isArray(args) ? args[index] : (args as Record<string, unknown>)[input.name || String(index)];
+    const formatted = formatEventArgument(input, value);
+    return { name: input.name || `param${index}`, type: parameterType(input), indexed: Boolean(input.indexed), hashed: formatted.hashed, value: formatted.value };
+  });
   return {
-    name: parsed.name,
-    signature: parsed.signature,
-    fullSignature: parsed.fragment.format("full"),
+    name: fragment.name,
+    signature: abiSignature(fragment),
+    fullSignature: `event ${fragment.name}(${fragment.inputs.map((input) => `${parameterType(input)}${input.indexed ? " indexed" : ""}${input.name ? ` ${input.name}` : ""}`).join(", ")})`,
     params,
     source,
   };
 }
 
-function createInterface(abi: InterfaceAbi): Interface {
-  try {
-    return new Interface(abi);
-  } catch {
-    throw new Error("ABI 格式无效，无法创建事件接口");
-  }
-}
-
-/**
- * Reject logs that do not exactly match the event definition. An event's
- * signature hash does not commit to its indexed flags, so the same topic0 can
- * describe differently-shaped logs across contracts; ethers' `parseLog` is
- * lenient about extra topics/data, which would silently decode wrong values.
- */
-function assertLogMatchesEvent(fragment: EventFragment, log: RawEventLog): void {
-  const expectedTopics = 1 + fragment.inputs.filter((input) => input.indexed).length;
-  if (log.topics.length !== expectedTopics) {
-    throw new Error(
-      `Topic 数量与事件定义不匹配：该事件需要 ${expectedTopics} 个 Topic，实际收到 ${log.topics.length} 个`
-    );
-  }
-
-  const nonIndexedTypes = fragment.inputs
-    .filter((input) => !input.indexed)
-    .map((input) => formatEventParamType(input));
-  const coder = AbiCoder.defaultAbiCoder();
-
-  if (nonIndexedTypes.length === 0) {
-    if (log.data !== "" && log.data !== "0x") {
-      throw new Error("DATA 与事件定义不匹配：该事件没有非 indexed 参数");
-    }
-    return;
-  }
-
-  let reencoded: string;
-  try {
-    reencoded = coder.encode(nonIndexedTypes, coder.decode(nonIndexedTypes, log.data));
-  } catch {
-    throw new Error("DATA 无法按事件定义解码");
-  }
-  if (reencoded.toLowerCase() !== log.data.toLowerCase()) {
-    throw new Error("DATA 与事件定义不匹配：存在多余或缺失的编码数据");
-  }
-}
-
-/**
- * Decode a raw log against an ABI. The event is matched by topic0, and the
- * ABI's indexed markers drive the split between topics and data.
- */
-export function decodeRawLogWithAbi(
-  abi: InterfaceAbi,
-  log: RawEventLog,
-  source: RawEventDecodeSource = "abi"
-): DecodedRawEvent {
-  const topic0 = log.topics[0];
-  if (!topic0) {
-    throw new Error("日志缺少 TOPIC_0，无法匹配事件");
-  }
-
-  const iface = createInterface(abi);
-  let fragment;
-  try {
-    fragment = iface.getEvent(topic0);
-  } catch {
-    fragment = null;
-  }
-  if (!fragment) {
-    throw new Error("该 ABI 中没有事件与日志的 Topic0 匹配");
-  }
-
-  assertLogMatchesEvent(fragment, log);
-
-  let parsed;
-  try {
-    parsed = iface.parseLog({ topics: log.topics, data: log.data });
-  } catch {
-    throw new Error("日志数据无法按 ABI 中的事件定义解码，请检查 Topic / DATA 是否属于该合约");
-  }
-  if (!parsed) {
-    throw new Error("该 ABI 中没有事件与日志的 Topic0 匹配");
-  }
-
-  return buildDecodedEvent(parsed, source);
-}
-
-/** Decode a raw log against every saved ABI that contains the event topic. */
-export function decodeRawLogWithLocalAbis(
-  sources: RawEventAbiSource[],
-  log: RawEventLog
-): DecodedRawEvent[] {
-  const topic0 = log.topics[0];
-  if (!topic0) {
-    return [];
-  }
-
+export function decodeRawLogWithLocalAbis(sources: RawEventAbiSource[], log: RawEventLog): DecodedRawEvent[] {
   const results: DecodedRawEvent[] = [];
-  const seenSignatures = new Set<string>();
-
-  for (const source of sources) {
-    let iface: Interface;
+  const seen = new Set<string>();
+  for (const item of sources) {
     try {
-      iface = new Interface(source.abi);
-    } catch {
-      continue;
-    }
-
-    let fragment;
-    try {
-      fragment = iface.getEvent(topic0);
-    } catch {
-      fragment = null;
-    }
-    if (!fragment) {
-      continue;
-    }
-
-    try {
-      assertLogMatchesEvent(fragment, log);
-    } catch {
-      continue;
-    }
-
-    let parsed;
-    try {
-      parsed = iface.parseLog({ topics: log.topics, data: log.data });
-    } catch {
-      continue;
-    }
-    if (!parsed) {
-      continue;
-    }
-
-    const decoded = buildDecodedEvent(parsed, "local");
-    decoded.contractName = source.name;
-    decoded.contractAddress = source.address;
-
-    if (seenSignatures.has(decoded.fullSignature)) {
-      continue;
-    }
-    seenSignatures.add(decoded.fullSignature);
-    results.push(decoded);
+      const decoded = decodeRawLogWithAbi(item.abi, log, "local");
+      if (seen.has(decoded.fullSignature)) continue;
+      seen.add(decoded.fullSignature);
+      results.push({ ...decoded, contractName: item.name, contractAddress: item.address });
+    } catch { /* This ABI does not describe the log. */ }
   }
-
   return results;
 }
 
@@ -435,8 +296,6 @@ function decodeParamsForLayout(
   indexedIndexes: ReadonlySet<number>,
   log: RawEventLog
 ): DecodedEventParam[] {
-  const coder = AbiCoder.defaultAbiCoder();
-
   const indexedValues = new Map<number, unknown>();
   const orderedIndexes = [...indexedIndexes].sort((left, right) => left - right);
 
@@ -448,18 +307,18 @@ function decodeParamsForLayout(
       return;
     }
 
-    const [decoded] = coder.decode([type], topic);
+    const [decoded] = decodeAbiParameters([parseParameter(type)], topic as Hex);
     indexedValues.set(paramIndex, decoded);
   });
 
   const nonIndexedTypes = types.filter((_, index) => !indexedIndexes.has(index));
   const nonIndexedValues =
-    nonIndexedTypes.length > 0 ? Array.from(coder.decode(nonIndexedTypes, log.data)) : [];
+    nonIndexedTypes.length > 0 ? Array.from(decodeAbiParameters(nonIndexedTypes.map(parseParameter), log.data as Hex)) : [];
 
   // A layout only counts as a match when the data re-encodes to exactly the
   // pasted payload; this rejects layouts whose parameter counts merely fit.
   if (nonIndexedTypes.length > 0) {
-    const reencoded = coder.encode(nonIndexedTypes, nonIndexedValues);
+    const reencoded = encodeAbiParameters(nonIndexedTypes.map(parseParameter), nonIndexedValues);
     if (reencoded.toLowerCase() !== log.data.toLowerCase()) {
       throw new Error("DATA 与推断的非 indexed 参数布局不一致");
     }
@@ -472,7 +331,7 @@ function decodeParamsForLayout(
     const indexed = indexedIndexes.has(index);
     const hashed = indexed && isHashedEventParamType(type);
     const value = indexed ? indexedValues.get(index) : nonIndexedValues[nonIndexedOffset++];
-    const hash = hashed ? getIndexedHash(value) : null;
+    const hash = hashed ? (value as { hash?: string } | undefined)?.hash ?? null : null;
 
     return {
       name: `param${index}`,
@@ -502,7 +361,7 @@ export function decodeRawLogWithSignature(
   if (!topic0) {
     throw new Error("日志缺少 TOPIC_0，无法匹配事件");
   }
-  if (id(canonical).toLowerCase() !== topic0.toLowerCase()) {
+  if (keccak256(toBytes(canonical)).toLowerCase() !== topic0.toLowerCase()) {
     throw new Error("事件签名与日志的 Topic0 不匹配");
   }
 

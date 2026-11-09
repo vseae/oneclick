@@ -1,4 +1,4 @@
-import { Interface } from "ethers";
+import { abiSelector, abiSignature, normalizeAbi } from "./abi";
 import { listContractsByChainId } from "./local-store";
 
 export type SignatureKind = "function" | "event";
@@ -99,46 +99,14 @@ async function lookupFromLocal(ctx: SourceContext): Promise<SignatureCandidate[]
   const output: SignatureCandidate[] = [];
 
   for (const contract of contracts) {
-    let iface: Interface;
     try {
-      iface = new Interface(contract.abi);
-    } catch {
-      continue;
-    }
-
-    if (ctx.normalized.kind === "function") {
-      iface.forEachFunction((fragment) => {
-        if (fragment.selector.toLowerCase() === ctx.normalized.hex) {
-          output.push({
-            name: fragment.format("sighash"),
-            source: "local",
-            kind: "function",
-            extra: `${contract.name} (${contract.address})`,
-          });
-        }
-      });
-      iface.forEachError((fragment) => {
-        if (fragment.selector.toLowerCase() === ctx.normalized.hex) {
-          output.push({
-            name: fragment.format("sighash"),
-            source: "local",
-            kind: "error",
-            extra: `${contract.name} (${contract.address})`,
-          });
-        }
-      });
-    } else {
-      iface.forEachEvent((fragment) => {
-        if (fragment.topicHash.toLowerCase() === ctx.normalized.hex) {
-          output.push({
-            name: fragment.format("sighash"),
-            source: "local",
-            kind: "event",
-            extra: `${contract.name} (${contract.address})`,
-          });
-        }
-      });
-    }
+      for (const item of normalizeAbi(contract.abi)) {
+        if (item.type !== "function" && item.type !== "event" && item.type !== "error") continue;
+        if ((ctx.normalized.kind === "event") !== (item.type === "event")) continue;
+        if (abiSelector(item).toLowerCase() !== ctx.normalized.hex) continue;
+        output.push({ name: abiSignature(item), source: "local", kind: item.type, extra: `${contract.name} (${contract.address})` });
+      }
+    } catch { continue; }
   }
 
   return deduplicateCandidates(output);

@@ -1,4 +1,4 @@
-import type { InterfaceAbi } from "ethers";
+import type { Abi } from "viem";
 
 /** The minimal contract shape used by the catalog, interaction panel and history views. */
 export interface ContractRecord {
@@ -6,7 +6,7 @@ export interface ContractRecord {
   name: string;
   address: string;
   chainId: number;
-  abi: InterfaceAbi;
+  abi: Abi;
   createdAt?: string;
   directoryId?: number | null;
 }

@@ -1,76 +1,16 @@
-import { ethers } from "ethers";
-import type { InterfaceAbi } from "ethers";
+import { BaseError, ContractFunctionRevertedError, isAddress, parseAbiParameter, type Abi, type AbiFunction, type AbiParameter } from "viem";
+import { abiSelector, abiSignature, arrayParameter, normalizeAbi, parameterType } from "./abi";
 
-/**
- * Extract a user-friendly error message from ethers contract call errors.
- * Handles common error codes like BAD_DATA (empty return from non-contract address),
- * CALL_EXCEPTION, NETWORK_ERROR, etc.
- */
-export function getReadableContractError(error: unknown, contractAbi?: any[]): string {
-  if (!(error instanceof Error)) return String(error);
-
-  const ethersError = error as any;
-  const code = ethersError.code;
-
-  if (code === "BAD_DATA" && ethersError.value === "0x") {
-    const method = ethersError.info?.method ?? "";
-    return `调用 ${method}() 返回空数据 — 目标地址可能不是合约地址，或该合约未实现此方法，请检查地址和 ABI 是否匹配`;
-  }
-
-  if (code === "CALL_EXCEPTION") {
-    if (contractAbi) {
-      const customError = parseCustomError(ethersError, contractAbi);
-      if (customError !== ethersError.message) return customError;
+export function getReadableContractError(error: unknown): string {
+  if (error instanceof BaseError) {
+    const reverted = error.walk((cause) => cause instanceof ContractFunctionRevertedError);
+    if (reverted instanceof ContractFunctionRevertedError) {
+      if (reverted.data?.errorName) return `Custom Error: ${reverted.data.errorName}(${(reverted.data.args ?? []).map(String).join(", ")})`;
+      return reverted.reason || reverted.shortMessage;
     }
-    return ethersError.reason ?? ethersError.message ?? "合约调用异常";
+    return error.shortMessage || error.message;
   }
-
-  if (code === "NETWORK_ERROR") {
-    return "网络错误 — 请检查 RPC 连接和网络设置";
-  }
-
-  if (code === "INSUFFICIENT_FUNDS") {
-    return "余额不足，无法执行此交易";
-  }
-
-  if (code === "UNPREDICTABLE_GAS_LIMIT") {
-    return "无法估算 Gas — 交易可能会失败，请检查参数和合约状态";
-  }
-
-  return ethersError.shortMessage ?? ethersError.reason ?? ethersError.message ?? "未知错误";
-}
-
-export function parseCustomError(error: any, contractAbi: any[]): string {
-  try {
-    const iface = new ethers.Interface(contractAbi);
-
-    if (error?.data) {
-      const errorData = error.data;
-
-      // Try to parse the error
-      for (const fragment of iface.fragments) {
-        if (fragment.type === "error") {
-          try {
-            const errorFragment = fragment as ethers.ErrorFragment;
-            const selector = ethers.id(errorFragment.format()).slice(0, 10);
-            if (errorData.startsWith(selector)) {
-              const decoded = iface.decodeErrorResult(errorFragment, errorData);
-              return `Custom Error: ${errorFragment.name}(${decoded
-                .map((d: any) => d.toString())
-                .join(", ")})`;
-            }
-          } catch {
-            continue;
-          }
-        }
-      }
-    }
-
-    // If we can't parse, return the original error message
-    return error?.message || error?.reason || error.toString();
-  } catch {
-    return error?.message || error?.reason || error.toString();
-  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function formatResult(result: any): string {
@@ -95,11 +35,11 @@ export function formatResult(result: any): string {
   return result.toString();
 }
 
-export function isReadMethod(method: ethers.FunctionFragment): boolean {
+export function isReadMethod(method: AbiFunction): boolean {
   return method.stateMutability === "view" || method.stateMutability === "pure";
 }
 
-export function isWriteMethod(method: ethers.FunctionFragment): boolean {
+export function isWriteMethod(method: AbiFunction): boolean {
   return (
     method.stateMutability === "nonpayable" ||
     method.stateMutability === "payable"
@@ -109,38 +49,39 @@ export function isWriteMethod(method: ethers.FunctionFragment): boolean {
 /**
  * Payable detection has to look at both the modern `stateMutability` and the
  * legacy `payable` flag: raw ABIs written before Solidity 0.6 often only carry
- * the boolean, and ethers can normalise those to `nonpayable`.
+ * the boolean, and some ABI parsers can normalise those to `nonpayable`.
  */
-export function isPayableMethod(method: ethers.FunctionFragment): boolean {
+export function isPayableMethod(method: AbiFunction): boolean {
   const legacy = (method as unknown as { payable?: boolean }).payable;
   return method.stateMutability === "payable" || legacy === true;
 }
 
 /**
- * Parse one raw input string into the JavaScript value ethers expects for the
+ * Parse one raw input string into the JavaScript value the ABI encoder expects for the
  * given ABI type. Shared by the interaction panel and the encoder/batch tools so
  * every entry point accepts the same syntax.
  */
-export function parseMethodParam(type: string | ethers.ParamType, raw: string): unknown {
-  const param = typeof type === "string" ? ethers.ParamType.from(type) : type;
-  const path = param.name || param.format("sighash");
+export function parseMethodParam(type: string | AbiParameter, raw: string): unknown {
+  const param = typeof type === "string" ? parseAbiParameter(type as never) : type;
+  const path = param.name || parameterType(param);
   const fail = (where: string, message: string): never => { throw new Error(`${where}: ${message}`); };
 
-  const parse = (item: ethers.ParamType, value: unknown, where: string, nested: boolean): unknown => {
-    if (item.baseType === "array") {
+  const parse = (item: AbiParameter, value: unknown, where: string, nested: boolean): unknown => {
+    const array = arrayParameter(item);
+    if (array) {
       if (!Array.isArray(value)) return fail(where, "请输入 JSON 数组");
-      if (item.arrayLength !== -1 && value.length !== item.arrayLength) {
-        return fail(where, `需要 ${item.arrayLength} 个元素，实际 ${value.length} 个`);
+      if (array.length !== null && value.length !== array.length) {
+        return fail(where, `需要 ${array.length} 个元素，实际 ${value.length} 个`);
       }
-      return value.map((entry, index) => parse(item.arrayChildren!, entry, `${where}[${index}]`, true));
+      return value.map((entry, index) => parse(array.child, entry, `${where}[${index}]`, true));
     }
-    if (item.baseType === "tuple") {
-      const components = item.components ?? [];
+    if (item.type === "tuple") {
+      const components = "components" in item ? item.components ?? [] : [];
       if (Array.isArray(value)) {
         if (value.length !== components.length) return fail(where, `需要 ${components.length} 个字段，实际 ${value.length} 个`);
         return components.map((component, index) => parse(component, value[index], `${where}.${component.name || index}`, true));
       }
-      const names = components.map((component) => component.name);
+      const names = components.map((component) => component.name ?? "");
       if (!value || typeof value !== "object" || names.some((name) => !name) || new Set(names).size !== names.length) {
         return fail(where, "请输入按顺序排列的 JSON 数组；字段名称完整且唯一时也可使用对象");
       }
@@ -148,12 +89,12 @@ export function parseMethodParam(type: string | ethers.ParamType, raw: string): 
       if (Object.keys(object).length !== names.length || names.some((name) => !Object.hasOwn(object, name))) {
         return fail(where, `字段必须且只能包含: ${names.join(", ")}`);
       }
-      return components.map((component) => parse(component, object[component.name], `${where}.${component.name}`, true));
+      return components.map((component) => parse(component, object[component.name ?? ""], `${where}.${component.name}`, true));
     }
-    if (item.baseType === "string") {
+    if (item.type === "string") {
       return typeof value === "string" ? value : fail(where, "请输入字符串");
     }
-    if (item.baseType === "bool") {
+    if (item.type === "bool") {
       if (nested && typeof value === "boolean") return value;
       if (!nested && (value === "true" || value === "false")) return value === "true";
       return fail(where, "请选择 true 或 false");
@@ -173,7 +114,7 @@ export function parseMethodParam(type: string | ethers.ParamType, raw: string): 
       return number;
     }
     if (item.type === "address") {
-      if (!ethers.isAddress(text)) return fail(where, "请输入有效的 0x 地址（含正确的校验大小写）");
+      if (!isAddress(text)) return fail(where, "请输入有效的 0x 地址（含正确的校验大小写）");
       return text;
     }
     const bytes = item.type.match(/^bytes(\d*)$/);
@@ -185,7 +126,7 @@ export function parseMethodParam(type: string | ethers.ParamType, raw: string): 
     return fail(where, `不支持的 ABI 类型 ${item.type}`);
   };
 
-  if (param.baseType === "array" || param.baseType === "tuple") {
+  if (arrayParameter(param) || param.type === "tuple") {
     if (!raw.trim()) return fail(path, "此参数必填");
     let value: unknown;
     try { value = JSON.parse(raw); } catch { return fail(path, "请输入有效的 JSON"); }
@@ -207,7 +148,7 @@ export function parseMethodParam(type: string | ethers.ParamType, raw: string): 
 }
 
 export function parseMethodParams(
-  method: ethers.FunctionFragment,
+  method: AbiFunction,
   raw: string[]
 ): unknown[] {
   return method.inputs.map((input, index) => {
@@ -228,27 +169,10 @@ export interface SelectorItem {
   selector: string;
 }
 
-function normalizeAbiInput(abiInput: unknown): InterfaceAbi {
-  if (typeof abiInput === "string") {
-    return JSON.parse(abiInput) as InterfaceAbi;
-  }
-  return abiInput as InterfaceAbi;
-}
-
 export function parseAbiSelectors(abiInput: unknown): SelectorItem[] {
-  const abi = normalizeAbiInput(abiInput);
-  const iface = new ethers.Interface(abi);
-  const items: SelectorItem[] = [];
-
-  iface.forEachFunction((fn) => {
-    items.push({ type: "function", name: fn.name, signature: fn.format("sighash"), selector: fn.selector });
+  const abi: Abi = normalizeAbi(typeof abiInput === "string" ? JSON.parse(abiInput) : abiInput);
+  return abi.flatMap((item) => {
+    if (item.type !== "function" && item.type !== "event" && item.type !== "error") return [];
+    return [{ type: item.type, name: item.name, signature: abiSignature(item), selector: abiSelector(item) }];
   });
-  iface.forEachEvent((ev) => {
-    items.push({ type: "event", name: ev.name, signature: ev.format("sighash"), selector: ev.topicHash });
-  });
-  iface.forEachError((err) => {
-    items.push({ type: "error", name: err.name, signature: err.format("sighash"), selector: err.selector });
-  });
-
-  return items;
 }

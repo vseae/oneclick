@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ethers } from "ethers";
+import { decodeFunctionData, encodeFunctionData, toFunctionSelector, type Address, type Hex } from "viem";
 import {
   MULTICALL3_ABI,
   MULTICALL3_CANONICAL_ADDRESS,
@@ -37,13 +37,11 @@ describe("multicall3 registry", () => {
       expect(getMulticall3Address(chainId)).toMatch(/^0x[0-9a-fA-F]{40}$/);
     }
 
-    const iface = new ethers.Interface(MULTICALL3_ABI);
     // Known Multicall3 aggregate3 selector.
-    expect(iface.getFunction("aggregate3")?.selector).toBe("0x82ad56cb");
+    expect(toFunctionSelector(MULTICALL3_ABI[0])).toBe("0x82ad56cb");
   });
 
-  it("encodes an aggregate3 call that ethers can decode again", () => {
-    const iface = new ethers.Interface(MULTICALL3_ABI);
+  it("encodes and decodes an aggregate3 call", () => {
     const calls = [
       {
         target: "0x1111111111111111111111111111111111111111",
@@ -57,8 +55,8 @@ describe("multicall3 registry", () => {
       },
     ];
 
-    const data = iface.encodeFunctionData("aggregate3", [calls]);
-    const decoded = iface.decodeFunctionData("aggregate3", data);
+    const data = encodeFunctionData({ abi: MULTICALL3_ABI, functionName: "aggregate3", args: [calls as { target: Address; allowFailure: boolean; callData: Hex }[]] });
+    const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data }).args;
 
     expect(decoded[0]).toHaveLength(2);
     expect(decoded[0][0].target).toBe(calls[0].target);

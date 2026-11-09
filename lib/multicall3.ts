@@ -1,3 +1,5 @@
+import { parseAbi } from "viem";
+
 /**
  * Multicall3 deployment registry.
  *
@@ -68,6 +70,6 @@ export function isMulticall3Supported(chainId?: number | null): boolean {
 }
 
 /** Subset of the Multicall3 ABI needed to batch read-only calls. */
-export const MULTICALL3_ABI = [
+export const MULTICALL3_ABI = parseAbi([
   "function aggregate3((address target, bool allowFailure, bytes callData)[] calls) payable returns ((bool success, bytes returnData)[] returnData)",
-] as const;
+]);

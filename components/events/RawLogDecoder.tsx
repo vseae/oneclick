@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { InterfaceAbi } from "ethers";
+import type { Abi } from "viem";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
@@ -255,7 +255,7 @@ export default function RawLogDecoder() {
     });
   };
 
-  const resolveAbi = (): InterfaceAbi | null => {
+  const resolveAbi = (): Abi | null => {
     if (abiSource === "saved") {
       const contract =
         selectedContractId === "" ? undefined : savedContracts.find((item) => item.id === selectedContractId);
@@ -272,7 +272,7 @@ export default function RawLogDecoder() {
       return null;
     }
     try {
-      return JSON.parse(trimmed) as InterfaceAbi;
+      return JSON.parse(trimmed) as Abi;
     } catch {
       toast.error("[INVALID_INPUT] ABI JSON 格式无效");
       return null;

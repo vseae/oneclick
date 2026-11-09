@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ethers } from "ethers";
+import { encodeAbiParameters, encodeFunctionData, type Abi, type AbiFunction } from "viem";
+import { abiSelector, abiSignature, normalizeAbi } from "@/lib/abi";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { Braces, ClipboardPaste, Code, Copy, Database } from "lucide-react";
@@ -16,7 +17,7 @@ type AbiSource = "saved" | "manual";
 interface FunctionItem {
   signature: string;
   selector: string;
-  fragment: ethers.FunctionFragment;
+  fragment: AbiFunction;
 }
 
 interface CallOutput {
@@ -26,7 +27,7 @@ interface CallOutput {
 }
 
 interface ParsedAbi {
-  iface: ethers.Interface | null;
+  iface: Abi | null;
   error: string | null;
 }
 
@@ -80,7 +81,7 @@ export default function EncoderTool() {
   // Build the interface from whichever ABI source is active. Everything is
   // derived, so switching sources can never leave a stale Interface behind.
   const parsedAbi = useMemo<ParsedAbi>(() => {
-    let abi: ethers.InterfaceAbi | null = null;
+    let abi: Abi | null = null;
 
     if (abiSource === "saved") {
       const contract =
@@ -93,14 +94,14 @@ export default function EncoderTool() {
       const trimmed = manualAbi.trim();
       if (!trimmed) return { iface: null, error: null };
       try {
-        abi = JSON.parse(trimmed) as ethers.InterfaceAbi;
+        abi = JSON.parse(trimmed) as Abi;
       } catch {
         return { iface: null, error: "ABI JSON 格式无效，请检查是否为合法的 JSON 数组" };
       }
     }
 
     try {
-      return { iface: new ethers.Interface(abi), error: null };
+      return { iface: normalizeAbi(abi), error: null };
     } catch {
       return { iface: null, error: "ABI 解析失败，请确认内容是 ABI 数组" };
     }
@@ -111,12 +112,11 @@ export default function EncoderTool() {
   const functionItems = useMemo<FunctionItem[]>(() => {
     if (!iface) return [];
     const unique = new Map<string, FunctionItem>();
-    iface.forEachFunction((fragment) => {
-      const signature = fragment.format("sighash");
-      if (!unique.has(signature)) {
-        unique.set(signature, { signature, selector: fragment.selector, fragment });
-      }
-    });
+    for (const fragment of iface) {
+      if (fragment.type !== "function") continue;
+      const signature = abiSignature(fragment);
+      if (!unique.has(signature)) unique.set(signature, { signature, selector: abiSelector(fragment), fragment });
+    }
     return Array.from(unique.values());
   }, [iface]);
 
@@ -125,7 +125,7 @@ export default function EncoderTool() {
   const method = selectedFn ? selectedFn.fragment : null;
   const methodInputs = method ? method.inputs : [];
 
-  const ctorInputs = useMemo(() => iface?.deploy?.inputs ?? [], [iface]);
+  const ctorInputs = useMemo(() => iface?.find((item) => item.type === "constructor")?.inputs ?? [], [iface]);
   const ctorChunks = useMemo(
     () => (ctorOutput ? splitChunks(ctorOutput) : []),
     [ctorOutput]
@@ -217,7 +217,7 @@ export default function EncoderTool() {
     try {
       const raw = methodInputs.map((_, index) => params[index] ?? "");
       const args = parseMethodParams(method, raw);
-      const data = iface.encodeFunctionData(method, args);
+      const data = encodeFunctionData({ abi: [method], functionName: method.name, args });
       setCallOutput({ data, selector: selectedFn.selector, signature: selectedFn.signature });
       setCtorOutput(null);
       toast.success("[ENCODE_OK] Calldata 生成成功");
@@ -239,7 +239,7 @@ export default function EncoderTool() {
       const values = ctorInputs.map((input, index) =>
         parseMethodParam(input, ctorParams[index] ?? "")
       );
-      const data = iface.encodeDeploy(values);
+      const data = encodeAbiParameters(ctorInputs, values);
       setCtorOutput(data);
       setCallOutput(null);
       toast.success(
@@ -422,7 +422,7 @@ export default function EncoderTool() {
                   </select>
                   {method ? (
                     <p className="mt-1.5 font-mono text-[11px] text-[var(--terminal-text-secondary)]">
-                      selector {method.selector}
+                      selector {abiSelector(method)}
                     </p>
                   ) : null}
                 </div>

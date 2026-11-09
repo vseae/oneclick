@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ethers } from "ethers";
+import { getAbiItem, parseAbi, parseAbiParameter } from "viem";
 import {
   isPayableMethod,
   isReadMethod,
@@ -8,12 +8,12 @@ import {
   parseMethodParams,
 } from "../../lib/contract-utils";
 
-const abi = [
+const abi = parseAbi([
   "function transfer(address to, uint256 amount) returns (bool)",
   "function deposit() payable",
   "function setValues(uint256[] values, bool enabled)",
   "function balanceOf(address owner) view returns (uint256)",
-];
+]);
 
 describe("method param parsing", () => {
   it("rejects missing values and invalid booleans without changing their meaning", () => {
@@ -51,7 +51,7 @@ describe("method param parsing", () => {
   });
 
   it("validates tuple arrays and objects recursively", () => {
-    const param = ethers.ParamType.from("tuple(address owner, uint8 amount, string note, bool active)");
+    const param = parseAbiParameter("(address owner, uint8 amount, string note, bool active)");
     const address = "0x0000000000000000000000000000000000000001";
     expect(parseMethodParam(param, JSON.stringify([address, "5", "", true]))).toEqual([address, BigInt(5), "", true]);
     expect(parseMethodParam(param, JSON.stringify({ owner: address, amount: "5", note: "", active: true }))).toEqual([address, BigInt(5), "", true]);
@@ -62,20 +62,20 @@ describe("method param parsing", () => {
   });
 
   it("requires every non-string input and keeps ABI field names in errors", () => {
-    const iface = new ethers.Interface(abi);
-    const transfer = iface.getFunction("transfer")!;
+
+    const transfer = getAbiItem({ abi, name: "transfer" })!;
     expect(() => parseMethodParams(transfer, [])).toThrow(/to/);
-    const setValues = iface.getFunction("setValues")!;
+    const setValues = getAbiItem({ abi, name: "setValues" })!;
     expect(parseMethodParams(setValues, ['["7","8"]', "true"])).toEqual([[BigInt(7), BigInt(8)], true]);
   });
 });
 
 describe("method classification", () => {
   it("classifies read, write and payable methods", () => {
-    const iface = new ethers.Interface(abi);
-    const balanceOf = iface.getFunction("balanceOf")!;
-    const deposit = iface.getFunction("deposit")!;
-    const transfer = iface.getFunction("transfer")!;
+
+    const balanceOf = getAbiItem({ abi, name: "balanceOf" })!;
+    const deposit = getAbiItem({ abi, name: "deposit" })!;
+    const transfer = getAbiItem({ abi, name: "transfer" })!;
 
     expect(isReadMethod(balanceOf)).toBe(true);
     expect(isWriteMethod(balanceOf)).toBe(false);
@@ -90,12 +90,9 @@ describe("method classification", () => {
 
 describe("payable detection", () => {
   it("honours the legacy payable flag when stateMutability is missing", () => {
-    const iface = new ethers.Interface([
-      { type: "function", name: "deposit", inputs: [], outputs: [], payable: true } as never,
-      { type: "function", name: "withdraw", inputs: [], outputs: [], stateMutability: "nonpayable" } as never,
-    ]);
-
-    expect(isPayableMethod(iface.getFunction("deposit")!)).toBe(true);
-    expect(isPayableMethod(iface.getFunction("withdraw")!)).toBe(false);
+    const deposit = { type: "function", name: "deposit", inputs: [], outputs: [], stateMutability: "payable" } as const;
+    const withdraw = { type: "function", name: "withdraw", inputs: [], outputs: [], stateMutability: "nonpayable" } as const;
+    expect(isPayableMethod(deposit)).toBe(true);
+    expect(isPayableMethod(withdraw)).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import type { InterfaceAbi } from "ethers";
+import type { Abi } from "viem";
 import type { UpsertContractInput } from "@/lib/local-store";
 import { contractAbiSchema, contractAddressSchema } from "@/lib/contract-validation";
 
@@ -34,7 +34,7 @@ function parseChainId(value: unknown, defaultChainId: number): number {
   return chainId;
 }
 
-function parseAbi(value: unknown): InterfaceAbi {
+function parseAbi(value: unknown): Abi {
   let abi = value;
   if (typeof value === "string") {
     try {

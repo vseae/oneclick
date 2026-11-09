@@ -3,7 +3,8 @@
 import AbiParamInput from "@/components/AbiParamInput";
 
 import { useMemo, useState } from "react";
-import { ethers } from "ethers";
+import { decodeFunctionResult, encodeFunctionData, type Abi, type AbiFunction, type Address, type Hex } from "viem";
+import { abiSelector, functionAbi, normalizeAbi } from "@/lib/abi";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { Copy, Play } from "lucide-react";
@@ -11,7 +12,7 @@ import ToolHeader from "@/components/tools/ToolHeader";
 import ValueDisplay from "@/components/ValueDisplay";
 import { useContracts } from "@/lib/queries";
 import { MULTICALL3_ABI, getMulticall3Address } from "@/lib/multicall3";
-import { useEthersProvider } from "@/lib/use-ethers-provider";
+import { useWalletClients } from "@/lib/use-wallet-clients";
 import { formatValueForDecimals, useValueDecimals } from "@/lib/value-decimals";
 import {
   formatResult,
@@ -32,27 +33,13 @@ interface RunResult {
   error?: string;
 }
 
-/**
- * Batch reads run as the connected account when possible: contracts that branch
- * on `msg.sender` would otherwise be called from the zero address.
- */
-async function getReadRunner(
-  provider: ethers.BrowserProvider
-): Promise<ethers.ContractRunner> {
-  try {
-    return await provider.getSigner();
-  } catch {
-    return provider;
-  }
-}
-
 /** One read to include in a Multicall3 `aggregate3` batch. */
 interface AggregateCall {
   key: string;
   label: string;
   address?: string;
   target: string;
-  fragment: ethers.FunctionFragment;
+  fragment: AbiFunction;
   args: unknown[];
   callData: string;
 }
@@ -65,25 +52,19 @@ interface AggregateCall {
  * revert reason (and any custom error) that Multicall3 does not return.
  */
 async function executeAggregate(
-  provider: ethers.BrowserProvider,
+  provider: NonNullable<ReturnType<typeof useWalletClients>["publicClient"]>,
   chainId: number,
-  iface: ethers.Interface,
-  abi: ethers.InterfaceAbi,
-  calls: AggregateCall[]
+  abi: Abi,
+  calls: AggregateCall[],
+  account?: Address
 ): Promise<RunResult[]> {
   const multicallAddress = getMulticall3Address(chainId);
   if (!multicallAddress) throw new Error("当前网络未部署 Multicall3");
 
-  const runner = await getReadRunner(provider);
-  const multicall = new ethers.Contract(multicallAddress, MULTICALL3_ABI, runner);
-
-  const responses = (await multicall.aggregate3.staticCall(
-    calls.map((call) => ({
-      target: call.target,
-      allowFailure: true,
-      callData: call.callData,
-    }))
-  )) as Array<{ success: boolean; returnData: string }>;
+  const { result: responses } = await provider.simulateContract({
+    address: multicallAddress as Address, abi: MULTICALL3_ABI, functionName: "aggregate3", account,
+    args: [calls.map((call) => ({ target: call.target as Address, allowFailure: true, callData: call.callData as Hex }))],
+  });
 
   const results: RunResult[] = [];
 
@@ -100,18 +81,17 @@ async function executeAggregate(
     if (!response.success) {
       let message = "调用回滚";
       try {
-        const contract = new ethers.Contract(call.target, abi, runner);
-        await contract[call.fragment.format("sighash")](...call.args);
+        await provider.readContract({ address: call.target as Address, abi: functionAbi(call.fragment, normalizeAbi(abi)), functionName: call.fragment.name, args: call.args, account });
       } catch (error) {
-        message = getReadableContractError(error, abi as any[]);
+        message = getReadableContractError(error);
       }
       results.push({ ...base, success: false, error: message });
       continue;
     }
 
     try {
-      const decoded = iface.decodeFunctionResult(call.fragment, response.returnData);
-      const value = decoded.length === 1 ? formatResult(decoded[0]) : formatResult(decoded);
+      const decoded = decodeFunctionResult({ abi: [call.fragment], functionName: call.fragment.name, data: response.returnData });
+      const value = formatResult(decoded);
       results.push({ ...base, success: true, value });
     } catch (error) {
       results.push({
@@ -155,8 +135,8 @@ function copyResultValue(value: string | undefined, decimals: number | null) {
  *   saved contract addresses on the current chain.
  */
 export default function BatchReadTool() {
-  const { chainId } = useAccount();
-  const provider = useEthersProvider();
+  const { chainId, address } = useAccount();
+  const { publicClient: provider } = useWalletClients();
   const { data: contracts = [], isPending: contractsLoading } = useContracts(chainId);
   const decimals = useValueDecimals();
 
@@ -178,13 +158,13 @@ export default function BatchReadTool() {
 
   const ifaceState = useMemo(() => {
     if (!selectedContract) {
-      return { iface: null as ethers.Interface | null, error: null as string | null };
+      return { iface: null as Abi | null, error: null as string | null };
     }
     try {
-      return { iface: new ethers.Interface(selectedContract.abi), error: null as string | null };
+      return { iface: normalizeAbi(selectedContract.abi), error: null as string | null };
     } catch (error) {
       return {
-        iface: null as ethers.Interface | null,
+        iface: null as Abi | null,
         error: error instanceof Error ? error.message : "ABI 无法解析",
       };
     }
@@ -193,14 +173,14 @@ export default function BatchReadTool() {
   const iface = ifaceState.iface;
 
   const readMethods = useMemo(() => {
-    if (!ifaceState.iface) return [] as ethers.FunctionFragment[];
-    return ifaceState.iface.fragments
-      .filter((fragment): fragment is ethers.FunctionFragment => fragment.type === "function")
+    if (!ifaceState.iface) return [] as AbiFunction[];
+    return ifaceState.iface
+      .filter((fragment): fragment is AbiFunction => fragment.type === "function")
       .filter(isReadMethod);
   }, [ifaceState]);
 
   const sourceMethod = useMemo(
-    () => readMethods.find((method) => method.selector === sourceMethodSelector) ?? null,
+    () => readMethods.find((method) => abiSelector(method) === sourceMethodSelector) ?? null,
     [readMethods, sourceMethodSelector]
   );
 
@@ -232,12 +212,12 @@ export default function BatchReadTool() {
     setResults([]);
   };
 
-  const setMethodParam = (method: ethers.FunctionFragment, index: number, value: string) => {
+  const setMethodParam = (method: AbiFunction, index: number, value: string) => {
     setMethodParams((prev) => {
-      const current = prev[method.selector] ?? new Array(method.inputs.length).fill("");
+      const current = prev[abiSelector(method)] ?? new Array(method.inputs.length).fill("");
       const next = [...current];
       next[index] = value;
-      return { ...prev, [method.selector]: next };
+      return { ...prev, [abiSelector(method)]: next };
     });
   };
 
@@ -269,11 +249,6 @@ export default function BatchReadTool() {
 
   const runBatch = async () => {
     setShowParamErrors(true);
-    const ethereum = (window as { ethereum?: ethers.Eip1193Provider }).ethereum;
-    if (!ethereum) {
-      toast.error("[WALLET_MISSING] 未检测到钱包，请安装 MetaMask 等浏览器钱包");
-      return;
-    }
     if (!chainId) {
       toast.error("[WALLET_MISSING] 请先连接钱包");
       return;
@@ -289,7 +264,7 @@ export default function BatchReadTool() {
 
     if (mode === "multi_method") {
       const methodsToRun = readMethods.filter((method) =>
-        selectedMethodSelectors.includes(method.selector)
+        selectedMethodSelectors.includes(abiSelector(method))
       );
       if (methodsToRun.length === 0) {
         toast.error("[INPUT_REQUIRED] 请至少勾选一个读取方法");
@@ -301,14 +276,14 @@ export default function BatchReadTool() {
       try {
         if (!iface) throw new Error("该合约的 ABI 无法解析");
         const calls: AggregateCall[] = methodsToRun.map((method) => {
-          const args = parseMethodParams(method, methodParams[method.selector] ?? []);
+          const args = parseMethodParams(method, methodParams[abiSelector(method)] ?? []);
           return {
-            key: `method-${method.selector}`,
+            key: `method-${abiSelector(method)}`,
             label: method.name,
             target: selectedContract.address,
             fragment: method,
             args,
-            callData: iface.encodeFunctionData(method, args),
+            callData: encodeFunctionData({ abi: [method], functionName: method.name, args }),
           };
         });
 
@@ -320,9 +295,9 @@ export default function BatchReadTool() {
         const nextResults = await executeAggregate(
           provider,
           chainId,
-          iface,
           selectedContract.abi,
-          calls
+          calls,
+          address
         );
 
         setResults(nextResults);
@@ -367,7 +342,7 @@ export default function BatchReadTool() {
     setResults([]);
     try {
       if (!iface) throw new Error("该合约的 ABI 无法解析");
-      const callData = iface.encodeFunctionData(method, sharedArgs);
+      const callData = encodeFunctionData({ abi: [method], functionName: method.name, args: sharedArgs });
       const calls: AggregateCall[] = targets.map((target) => ({
         key: `contract-${target.id}`,
         label: target.name,
@@ -383,9 +358,9 @@ export default function BatchReadTool() {
       const nextResults = await executeAggregate(
         provider,
         chainId,
-        iface,
         selectedContract.abi,
-        calls
+        calls,
+        address
       );
 
       setResults(nextResults);
@@ -533,17 +508,17 @@ export default function BatchReadTool() {
                 </p>
               ) : (
                 readMethods.map((method, index) => {
-                  const checked = selectedMethodSelectors.includes(method.selector);
+                  const checked = selectedMethodSelectors.includes(abiSelector(method));
                   return (
                     <div
-                      key={method.selector}
+                      key={abiSelector(method)}
                       className={index > 0 ? "border-t border-[var(--terminal-separator)]" : ""}
                     >
                       <label className="flex cursor-pointer items-start gap-2 px-2.5 py-2 hover:bg-[var(--terminal-fill)]">
                         <input
                           type="checkbox"
                           checked={checked}
-                          onChange={() => toggleMethod(method.selector)}
+                          onChange={() => toggleMethod(abiSelector(method))}
                           className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-pointer accent-[var(--terminal-blue)]"
                           aria-label={`选择方法 ${method.name}`}
                         />
@@ -555,7 +530,7 @@ export default function BatchReadTool() {
                             </span>
                           </span>
                           <span className="mt-0.5 block break-all font-mono text-[10px] text-[var(--terminal-text-secondary)]">
-                            {method.selector}
+                            {abiSelector(method)}
                           </span>
                         </span>
                       </label>
@@ -563,7 +538,7 @@ export default function BatchReadTool() {
                       {checked && method.inputs.length > 0 && (
                         <div className="space-y-2 px-2.5 pb-2.5 pl-8">
                           {method.inputs.map((input, paramIndex) => (
-                            <AbiParamInput key={paramIndex} index={paramIndex} input={input} id={`mm-${method.selector}-${paramIndex}`} value={methodParams[method.selector]?.[paramIndex] ?? ""} onChange={(value) => setMethodParam(method, paramIndex, value)} showError={showParamErrors} />
+                            <AbiParamInput key={paramIndex} index={paramIndex} input={input} id={`mm-${abiSelector(method)}-${paramIndex}`} value={methodParams[abiSelector(method)]?.[paramIndex] ?? ""} onChange={(value) => setMethodParam(method, paramIndex, value)} showError={showParamErrors} />
                           ))}
                         </div>
                       )}
@@ -590,7 +565,7 @@ export default function BatchReadTool() {
               >
                 <option value="">选择读取方法…</option>
                 {readMethods.map((method) => (
-                  <option key={method.selector} value={method.selector}>
+                  <option key={abiSelector(method)} value={abiSelector(method)}>
                     {method.name} ({method.inputs.length} params)
                   </option>
                 ))}

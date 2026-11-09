@@ -1,4 +1,5 @@
-import { ethers, type InterfaceAbi } from "ethers";
+import type { Abi } from "viem";
+import { normalizeAbi } from "./abi";
 import { z } from "zod";
 
 export const contractNameSchema = z
@@ -13,19 +14,19 @@ export const contractAddressSchema = z
   .regex(/^0[xX][a-fA-F0-9]{40}$/, "无效的合约地址（应为 0x + 40 位十六进制）");
 
 /**
- * ABI must be an array that ethers can actually parse. This rejects `{}`,
+ * ABI must be an array that the application can parse. This rejects `{}`,
  * `null` and `"text"`, none of which can be rendered safely by the
  * interaction panel. An empty array is allowed (the contract simply exposes no
  * methods).
  */
-export const contractAbiSchema = z.custom<InterfaceAbi>(
+export const contractAbiSchema = z.custom<Abi>(
   (value) => {
     if (!Array.isArray(value)) return false;
     try {
-      const iface = new ethers.Interface(value as InterfaceAbi);
+      const items = normalizeAbi(value);
       // Empty ABIs are allowed; non-empty arrays must contain at least one
-      // fragment ethers can understand (rejects `[1, 2]` and similar junk).
-      return value.length === 0 || iface.fragments.length > 0;
+      // valid ABI item (rejects `[1, 2]` and similar junk).
+      return value.length === 0 || items.length > 0;
     } catch {
       return false;
     }
@@ -80,7 +81,7 @@ export function assertContractUpdate(value: unknown): ContractUpdateInput {
 }
 
 /** Parse an ABI from JSON text, with the same message used by the forms. */
-export function parseAbiText(text: string): InterfaceAbi {
+export function parseAbiText(text: string): Abi {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useMemo, useRef } from "react";
-import { ethers } from "ethers";
+import { encodeFunctionData, formatUnits, type AbiFunction, type Address } from "viem";
+import { abiSelector, abiSignature, functionAbi, normalizeAbi, parameterType } from "@/lib/abi";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 import { useSpring, animated } from "react-spring";
@@ -32,7 +33,7 @@ import AbiParamInput from "@/components/AbiParamInput";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { formatValueForDecimals, useValueDecimals } from "@/lib/value-decimals";
 import { useReducedMotion } from "@/lib/use-reduced-motion";
-import { useEthersProvider } from "@/lib/use-ethers-provider";
+import { useWalletClients } from "@/lib/use-wallet-clients";
 import { addHistory, updateHistory as updateLocalHistory } from "@/lib/local-store";
 import type { ContractRecord } from "@/lib/types";
 import ValueDisplay from "@/components/ValueDisplay";
@@ -78,8 +79,8 @@ interface HistoryPayload {
   chainId: number;
 }
 
-function getMethodKey(method: ethers.FunctionFragment) {
-  return method.selector;
+function getMethodKey(method: AbiFunction) {
+  return abiSelector(method);
 }
 
 function buildOverrides(options?: ExecuteOptions) {
@@ -98,7 +99,7 @@ function MethodItem({
   contract,
   onCheckWallet,
 }: {
-  method: ethers.FunctionFragment;
+  method: AbiFunction;
   isWrite: boolean;
   onExecute: (params: string[], options: ExecuteOptions) => void;
   onEstimateGas?: (params: string[], options: ExecuteOptions) => Promise<GasEstimate>;
@@ -259,7 +260,7 @@ function MethodItem({
           <div className={`w-2 h-2 ${isWrite ? "bg-[var(--terminal-orange)]" : "bg-[var(--terminal-green)]"}`} aria-hidden="true" />
           <span className="font-mono text-[13px] font-medium">{method.name}</span>
           <code className="text-[11px] font-mono bg-[var(--terminal-fill)] px-1.5 py-0.5 border border-[var(--terminal-separator)] text-[var(--terminal-text-secondary)]">
-            {method.selector}
+            {abiSelector(method)}
           </code>
           {method.inputs.length > 0 && (
             <span className="text-[12px] text-[var(--terminal-text-secondary)]">
@@ -282,19 +283,19 @@ function MethodItem({
       <animated.div style={contentSpring} className="overflow-hidden">
         <div className="space-y-3 px-4 pb-4">
           {method.inputs.map((input, i) => (
-            <AbiParamInput key={i} index={i} input={input} id={`${method.selector}-param-${i}`} value={params[i]} showError={showParamErrors} onChange={(value) => { const next = [...params]; next[i] = value; setParams(next); invalidate(); }} />
+            <AbiParamInput key={i} index={i} input={input} id={`${abiSelector(method)}-param-${i}`} value={params[i]} showError={showParamErrors} onChange={(value) => { const next = [...params]; next[i] = value; setParams(next); invalidate(); }} />
           ))}
 
           {payable && (
             <div>
-              <label htmlFor={`${method.selector}-value`} className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1">
+              <label htmlFor={`${abiSelector(method)}-value`} className="block text-[12px] font-medium text-[var(--terminal-text-secondary)] mb-1">
                 Value
                 <span className="ml-1 opacity-60">({currency ? currency.name ? `${currency.name} / ${currency.symbol}` : currency.symbol : "币种未知"})</span>
               </label>
               <div className="terminal-prompt-wrap">
                 <input
-                  id={`${method.selector}-value`}
-                  name={`${method.selector}-value`}
+                  id={`${abiSelector(method)}-value`}
+                  name={`${abiSelector(method)}-value`}
                   className="terminal-input font-mono text-[13px]"
                   placeholder="0.0"
                   inputMode="decimal"
@@ -499,10 +500,10 @@ function MethodItem({
                 ["网络", `${getNativeChain(contract.chainId)?.name ?? "未知网络"} (Chain ID: ${contract.chainId})`],
                 ["账户", pendingWrite.options.expectedAccount ?? ""],
                 ["合约地址", contract.address],
-                ["方法", method.format("sighash")],
+                ["方法", abiSignature(method)],
                 ["附带金额", formatNativeAmount(BigInt(pendingWrite.options.valueWei ?? "0"), contract.chainId)],
               ].map(([label, value]) => <div key={label}><dt className="text-[var(--terminal-text-secondary)]">{label}</dt><dd className="break-all font-mono">{value}</dd></div>)}
-              <div><dt className="text-[var(--terminal-text-secondary)]">参数</dt><dd className="break-all font-mono whitespace-pre-wrap">{method.inputs.length ? method.inputs.map((input, index) => `${input.name || `param${index}`} (${input.format("sighash")}): ${JSON.stringify(pendingWrite.parsed[index], (_, value) => typeof value === "bigint" ? value.toString() : value)}`).join("\n") : "无"}</dd></div>
+              <div><dt className="text-[var(--terminal-text-secondary)]">参数</dt><dd className="break-all font-mono whitespace-pre-wrap">{method.inputs.length ? method.inputs.map((input, index) => `${input.name || `param${index}`} (${parameterType(input)}): ${JSON.stringify(pendingWrite.parsed[index], (_, value) => typeof value === "bigint" ? value.toString() : value)}`).join("\n") : "无"}</dd></div>
             </dl>
             {pendingWrite.error && <p className="break-all text-[12px] text-[var(--terminal-red)]" role="alert">预演失败：{pendingWrite.error}</p>}
             <div className="flex gap-2">
@@ -518,7 +519,7 @@ function MethodItem({
 
 export default function ContractInteractView({ contract, onClose, onHistoryUpdate }: ContractInteractViewProps) {
   const { chainId, address } = useAccount();
-  const provider = useEthersProvider();
+  const { publicClient: provider, walletClient } = useWalletClients();
   const [activeTab, setActiveTab] = useState<"read" | "write">("read");
   const [results, setResults] = useState<Record<string, string>>({});
   const [transactions, setTransactions] = useState<Record<string, { hash: string; chainId: number }>>({});
@@ -527,7 +528,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
 
   const ifaceState = useMemo(() => {
     try {
-      return { iface: new ethers.Interface(contract.abi), error: null as string | null };
+      return { iface: normalizeAbi(contract.abi), error: null as string | null };
     } catch (error) {
       return {
         iface: null,
@@ -537,7 +538,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   }, [contract.abi]);
   const iface = ifaceState.iface;
   const methods = useMemo(
-    () => (iface ? (iface.fragments.filter(f => f.type === "function") as ethers.FunctionFragment[]) : []),
+    () => (iface ? (iface.filter(f => f.type === "function") as AbiFunction[]) : []),
     [iface]
   );
   const readMethods = useMemo(() => methods.filter(isReadMethod), [methods]);
@@ -546,11 +547,11 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     () => writeMethods.filter(isPayableMethod).length,
     [writeMethods]
   );
-  const filterMethods = (items: ethers.FunctionFragment[]) => {
+  const filterMethods = (items: AbiFunction[]) => {
     const query = methodSearch.trim().toLowerCase();
     if (!query) return items;
     return items.filter((method) => {
-      const signature = method.format("sighash").toLowerCase();
+      const signature = abiSignature(method).toLowerCase();
       return method.name.toLowerCase().includes(query) || signature.includes(query);
     });
   };
@@ -562,24 +563,13 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
 
   const checkWriteWallet = async (expectedAccount?: string) => {
     const wallet = getProvider();
-    const actualChain = Number(await wallet.send("eth_chainId", []));
-    const accounts = await wallet.send("eth_accounts", []) as string[];
+    const actualChain = await wallet.getChainId();
+    if (!walletClient) throw new Error("请先连接钱包");
+    const accounts = await walletClient.getAddresses();
     const account = accounts.find((entry) => entry.toLowerCase() === address?.toLowerCase());
     if (actualChain !== contract.chainId || chainId !== contract.chainId) throw new Error(`钱包网络与合约网络不一致，请切换到 Chain ID ${contract.chainId}`);
     if (!account || !address || account.toLowerCase() !== address.toLowerCase() || (expectedAccount && account.toLowerCase() !== expectedAccount.toLowerCase())) throw new Error("钱包账户已变化，请重新核对交易");
     return account;
-  };
-
-  /**
-   * Reads and simulations should run as the connected account: many contracts
-   * branch on `msg.sender`, and a provider-only call would use the zero address.
-   */
-  const getReadRunner = async (provider: ethers.BrowserProvider) => {
-    try {
-      return await provider.getSigner();
-    } catch {
-      return provider;
-    }
   };
 
   const serializeBigInt = (value: unknown): unknown => {
@@ -623,7 +613,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     onHistoryUpdate?.();
   };
 
-  const getHistoryBase = (method: ethers.FunctionFragment, params: unknown[]): HistoryPayload => ({
+  const getHistoryBase = (method: AbiFunction, params: unknown[]): HistoryPayload => ({
     contractId: contract.id,
     contractName: contract.name,
     contractAddress: contract.address,
@@ -633,15 +623,13 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
     chainId: chainId ?? contract.chainId,
   });
 
-  const executeRead = async (method: ethers.FunctionFragment, params: string[]) => {
+  const executeRead = async (method: AbiFunction, params: string[]) => {
     const key = getMethodKey(method);
     setLoading(prev => ({ ...prev, [key]: true }));
     try {
       const provider = getProvider();
-      const runner = await getReadRunner(provider);
-      const c = new ethers.Contract(contract.address, contract.abi, runner);
       const parsedParams = parseMethodParams(method, params);
-      const result = await c[method.format("sighash")](...parsedParams);
+      const result = await provider.readContract({ address: contract.address as Address, abi: functionAbi(method, iface ?? []), functionName: method.name, args: parsedParams, account: address });
       const formattedResult = formatResult(result);
 
       await saveHistory({
@@ -652,7 +640,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
       setResults(prev => ({ ...prev, [key]: formattedResult }));
       toast.success("查询成功");
     } catch (error) {
-      const message = getReadableContractError(error, contract.abi as any[]);
+      const message = getReadableContractError(error);
 
       try {
         await saveHistory({
@@ -671,56 +659,44 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
   };
 
   const estimateGas = async (
-    method: ethers.FunctionFragment,
+    method: AbiFunction,
     params: string[],
     options: ExecuteOptions
   ): Promise<GasEstimate> => {
     await checkWriteWallet();
     const provider = getProvider();
-    const runner = await getReadRunner(provider);
-    const c = new ethers.Contract(contract.address, contract.abi, runner);
     const parsedParams = parseMethodParams(method, params);
-    const estimatedGas = await c[method.format("sighash")].estimateGas(
-      ...parsedParams,
-      buildOverrides(options)
-    );
-    const feeData = await provider.getFeeData();
-    const gasPrice = feeData.gasPrice ?? feeData.maxFeePerGas;
+    const estimatedGas = await provider.estimateGas({ to: contract.address as Address, data: encodeFunctionData({ abi: [method], functionName: method.name, args: parsedParams }), account: address, ...buildOverrides(options) });
+    const gasPrice = await provider.getGasPrice();
     return {
       gas: estimatedGas.toLocaleString(),
-      gasPrice: gasPrice === null ? "未知" : `${ethers.formatUnits(gasPrice, 9)} GWei`,
+      gasPrice: gasPrice === null ? "未知" : `${formatUnits(gasPrice, 9)} GWei`,
       totalCost: gasPrice === null ? "未知" : formatNativeAmount(estimatedGas * gasPrice, contract.chainId),
     };
   };
 
   /** Run the write as an `eth_call` from the connected account, without sending. */
   const simulateWrite = async (
-    method: ethers.FunctionFragment,
+    method: AbiFunction,
     params: string[],
     options: ExecuteOptions
   ): Promise<SimulationResult> => {
     try {
       await checkWriteWallet();
       const provider = getProvider();
-      const signer = await provider.getSigner();
-      const from = await signer.getAddress();
-      const c = new ethers.Contract(contract.address, contract.abi, signer);
       const parsedParams = parseMethodParams(method, params);
-      const result = await c[method.format("sighash")].staticCall(
-        ...parsedParams,
-        { ...buildOverrides(options), from }
-      );
+      const { result } = await provider.simulateContract({ address: contract.address as Address, abi: functionAbi(method, iface ?? []), functionName: method.name, args: parsedParams, account: address, ...buildOverrides(options) });
       if (result === null || result === undefined) {
         return { ok: true, message: "调用成功（无返回值）" };
       }
       return { ok: true, message: formatResult(result) };
     } catch (error) {
-      return { ok: false, message: getReadableContractError(error, contract.abi as any[]) };
+      return { ok: false, message: getReadableContractError(error) };
     }
   };
 
   const executeWrite = async (
-    method: ethers.FunctionFragment,
+    method: AbiFunction,
     params: string[],
     options: ExecuteOptions
   ) => {
@@ -739,17 +715,12 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
       const provider = getProvider();
       if (!options.expectedAccount) throw new Error("请先确认交易");
       await checkWriteWallet(options.expectedAccount);
-      const signer = await provider.getSigner(options.expectedAccount);
+      if (!walletClient) throw new Error("请先连接钱包");
       await checkWriteWallet(options.expectedAccount);
-      const c = new ethers.Contract(contract.address, contract.abi, signer);
       const parsedParams = parseMethodParams(method, params);
-      const tx = await c[method.format("sighash")](
-        ...parsedParams,
-        buildOverrides(options)
-      );
-      txHash = tx.hash;
-      transactionChainId = Number(tx.chainId);
-      setTransactions(prev => ({ ...prev, [key]: { hash: tx.hash, chainId: transactionChainId } }));
+      txHash = await walletClient.writeContract({ address: contract.address as Address, abi: functionAbi(method, iface ?? []), functionName: method.name, args: parsedParams, account: options.expectedAccount as Address, chain: walletClient.chain, ...buildOverrides(options) });
+      transactionChainId = contract.chainId;
+      setTransactions(prev => ({ ...prev, [key]: { hash: txHash!, chainId: transactionChainId } }));
       setResults(prev => ({ ...prev, [key]: "交易已发送，等待确认…" }));
 
       historyId = await saveHistory({
@@ -761,13 +732,16 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
       });
 
       toast.success("交易已发送");
-      const receipt = await tx.wait();
+      let cancelled = false;
+      const receipt = await provider.waitForTransactionReceipt({ hash: txHash as `0x${string}`, onReplaced: ({ reason }) => { cancelled = reason === "cancelled"; } });
+      if (cancelled) throw new Error("交易已取消");
+      if (receipt.status !== "success") throw new Error("交易执行失败");
       const confirmedResult = "交易已确认";
-      setTransactions(prev => ({ ...prev, [key]: { hash: receipt.hash, chainId: transactionChainId } }));
+      setTransactions(prev => ({ ...prev, [key]: { hash: receipt.transactionHash, chainId: transactionChainId } }));
 
       if (historyId) {
         await updateHistory(historyId, {
-          txHash: receipt.hash,
+          txHash: receipt.transactionHash,
           result: `✅ Transaction confirmed! Gas used: ${receipt.gasUsed.toString()}`,
         });
       }
@@ -775,7 +749,7 @@ export default function ContractInteractView({ contract, onClose, onHistoryUpdat
       setResults(prev => ({ ...prev, [key]: confirmedResult }));
       toast.success("交易已确认");
     } catch (error) {
-      const message = getReadableContractError(error, contract.abi as any[]);
+      const message = getReadableContractError(error);
 
       try {
         if (historyId) {
